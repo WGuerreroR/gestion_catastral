@@ -117,3 +117,10 @@ def activate(db: Session, persona_id: int):
         {"id": persona_id}
     )
     db.commit()
+    
+def get_by_identificacion(db: Session, identificacion: str):
+    resultado = db.execute(text("""
+        SELECT id, password_hash FROM admin_personas
+        WHERE identificacion::text = :identificacion AND activo = true
+    """), {"identificacion": identificacion}).fetchone()
+    return dict(resultado._mapping) if resultado else None

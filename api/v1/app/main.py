@@ -25,5 +25,5 @@ app.include_router(spatial.router, prefix="/api/v1")
 router = APIRouter()
 @router.get("/")
 def root():
-    return {"mensaje": "API SGestión Predial Chiquinquirá"}
+    return {"mensaje": "API Gestión Predial"}
 app.include_router(router)

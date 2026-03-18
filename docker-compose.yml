@@ -1,16 +1,16 @@
-version: '3'
 services:
   api_v1:
+    platform: linux/amd64   # ← forzar emulación amd64 en Apple Silicon
     build:
       context: ./api/v1
       dockerfile: Dockerfile
     volumes:
-       - ./api/v1/app/:/app/
-    working_dir: /app  
+      - ./api/v1/app/:/app/
+      - ./data/qgis/:/app/data/
+    working_dir: /app
     ports:
-      - "8400:8500"
-
-
+      - "8400:8400"
+      
   app:
     build: ./webapp
     ports:

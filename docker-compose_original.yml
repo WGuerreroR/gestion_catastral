@@ -1,0 +1,12 @@
+version: '3'
+services:
+  api_v1:
+    build:
+      context: ./api/v1
+      dockerfile: Dockerfile
+    volumes:
+      - ./api/v1/app/:/app/
+      - ./data/qgis/:/app/data/
+    working_dir: /app  
+    ports:
+      - "8400:8500"

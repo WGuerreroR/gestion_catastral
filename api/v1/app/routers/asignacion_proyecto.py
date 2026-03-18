@@ -1,15 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from db.database import get_db
 from core.deps import get_current_user, require_roles
-from repositories import asignacion_proyecto_repo
+from core.security import verify_password
+from services.qgis_export_service import generar_paquete_proyecto
+from repositories import asignacion_proyecto_repo,persona_repo
 from schemas.asignacion_proyecto import (
     AsignacionProyectoCreate, AsignacionProyectoUpdate,
     AsignacionProyectoResponse, CambioResponsable
 )
 from pydantic import BaseModel
 import json
+import os
+basic_auth = HTTPBasic(auto_error=False)  
+
+
 
 router = APIRouter(prefix="/proyectos", tags=["proyectos"])
 
@@ -23,6 +31,16 @@ class ConfirmarAsignacion(BaseModel):
 
 class CambioEstadoPredio(BaseModel):
     estado: str
+
+
+
+EXPORTS_DIR = "/app/data/exports"
+os.makedirs(EXPORTS_DIR, exist_ok=True)
+ 
+ 
+def _zip_path(clave: str) -> str:
+    return os.path.join(EXPORTS_DIR, f"{clave}.zip")
+ 
 
 @router.get("/", response_model=List[AsignacionProyectoResponse])
 def listar_proyectos(
@@ -189,3 +207,138 @@ def get_area_proyecto(
         raise HTTPException(status_code=404, detail="El proyecto no tiene área definida")
     return area
  
+
+
+ 
+def _generar_y_guardar(db: Session, proyecto_id: int, clave: str) -> str:
+    """Genera el zip, lo guarda en disco y devuelve la ruta."""
+    zip_bytes = generar_paquete_proyecto(db, proyecto_id, clave)
+    zip_path  = _zip_path(clave)
+    with open(zip_path, "wb") as f:
+        f.write(zip_bytes)
+    return zip_path
+ 
+ 
+@router.get("/clave/{id}/descarga")
+def descargar_proyecto_por_id(
+    id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    proyecto = asignacion_proyecto_repo.get_by_id(db, id)
+    clave_proyecto = "archivo"
+    if not proyecto:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+ 
+    try:
+        clave_proyecto = proyecto['clave_proyecto']
+        zip_path = _generar_y_guardar(db, id, clave_proyecto)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generando paquete: {e}")
+ 
+    return FileResponse(
+        path=zip_path,
+        media_type="application/zip",
+        filename=f"{clave_proyecto}.zip"
+    )
+ 
+
+@router.get("/clave/{clave_proyecto}/descarga")
+def descargar_proyecto_por_clave(
+    clave_proyecto: str,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    ref = asignacion_proyecto_repo.get_by_clave(db, clave_proyecto)
+    if not ref:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+ 
+    try:
+        zip_path = _generar_y_guardar(db, ref.id, clave_proyecto)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generando paquete: {e}")
+ 
+    return FileResponse(
+        path=zip_path,
+        media_type="application/zip",
+        filename=f"{clave_proyecto}.zip"
+    )
+ 
+
+def _autenticar_qfield(db: Session, credentials: HTTPBasicCredentials, token: str):
+    # ── Basic Auth ────────────────────────────────────────────────────────────
+    if credentials and credentials.username:
+        persona = persona_repo.get_by_identificacion(db, credentials.username)
+        if not persona or not verify_password(credentials.password, persona["password_hash"]):
+            raise HTTPException(
+                status_code=401,
+                detail="Credenciales inválidas",
+                headers={"WWW-Authenticate": 'Basic realm="QField"'}
+            )
+        return persona
+ 
+    # ── Token JWT en query param ──────────────────────────────────────────────
+    if token:
+        from app.core.security import decode_token
+        payload = decode_token(token)
+        if not payload:
+            raise HTTPException(status_code=401, detail="Token inválido o expirado")
+        return payload
+ 
+    # ── Sin credenciales → QField muestra diálogo de login ───────────────────
+    raise HTTPException(
+        status_code=401,
+        detail="Autenticación requerida",
+        headers={"WWW-Authenticate": 'Basic realm="QField"'}
+    )
+ 
+ 
+@router.get("/clave/{clave_proyecto}/descarga/qfields")
+def descargar_proyecto_qfield(
+    clave_proyecto: str,
+    db: Session                       = Depends(get_db),
+    credentials: HTTPBasicCredentials = Depends(basic_auth),
+    token: str                        = Query(default=None, include_in_schema=False)
+):
+    """
+    Descarga el paquete QField.
+    Cualquier usuario activo puede descargar (Basic Auth o ?token=<jwt>).
+    Usa cache si existe, genera si no.
+    """
+    _autenticar_qfield(db, credentials, token)
+ 
+    zip_path = _zip_path(clave_proyecto)
+ 
+    if os.path.exists(zip_path):
+        return FileResponse(
+            path=zip_path,
+            media_type="application/zip",
+            filename=f"{clave_proyecto}.zip"
+        )
+ 
+    ref = asignacion_proyecto_repo.get_by_clave(db, clave_proyecto)
+    if not ref:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+ 
+    try:
+        zip_path = _generar_y_guardar(db, ref.id, clave_proyecto)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generando paquete: {e}")
+ 
+    return FileResponse(
+        path=zip_path,
+        media_type="application/zip",
+        filename=f"{clave_proyecto}.zip"
+    )

@@ -1,0 +1,8 @@
+data/qgis/exports/*
+api/v1/app/__pycache__/*
+api/v1/app/db/__pycache__/*
+api/v1/app/repositories/__pycache__/*
+api/v1/app/core/__pycache__/*
+api/v1/app/routers/__pycache__/*
+api/v1/app/schemas/__pycache__/*
+api/v1/app/services/__pycache__/*

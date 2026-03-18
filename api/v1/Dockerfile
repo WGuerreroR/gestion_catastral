@@ -1,42 +1,34 @@
-FROM python:3.14
+FROM --platform=linux/amd64 qgis/qgis:3.44.8-noble
 
-# ===============================
-# Dependencias del sistema (GIS)
-# ===============================
-RUN apt-get update && apt-get install -y \
-    gdal-bin \
-    libgdal-dev \
-    libproj-dev \
-    proj-data \
-    proj-bin \
-    libgeos-dev \
-    build-essential \
-    python3-dev \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# ===============================
-# Variables necesarias
-# ===============================
+ENV DEBIAN_FRONTEND=noninteractive
+ENV QT_QPA_PLATFORM=offscreen
+ENV PYTHONPATH=/usr/share/qgis/python:/usr/share/qgis/python/plugins:$PYTHONPATH
 ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
 ENV C_INCLUDE_PATH=/usr/include/gdal
-ENV GDAL_CONFIG=/usr/bin/gdal-config
+ENV QGIS_PLUGINPATH=/root/.local/share/QGIS/QGIS3/profiles/default/python/plugins
 
-# ===============================
-# App
-# ===============================
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    python3-dev \
+    curl \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# GitHub descomprime el tag v4.18.3 como "qfieldsync-4.18.3/" (sin la v)
+RUN mkdir -p $QGIS_PLUGINPATH && \
+    curl -L "https://github.com/opengisch/qfieldsync/archive/refs/tags/v4.18.3.zip" \
+         -o /tmp/qfieldsync.zip && \
+    unzip /tmp/qfieldsync.zip -d /tmp/qfieldsync_src && \
+    mv /tmp/qfieldsync_src/qfieldsync-4.18.3/qfieldsync $QGIS_PLUGINPATH/qfieldsync && \
+    rm -rf /tmp/qfieldsync.zip /tmp/qfieldsync_src
+
 WORKDIR /app
 COPY app/requirements.txt requirements.txt
 
-# Actualizar pip (importante para wheels)
-RUN pip install --upgrade pip
-
-# Instalar dependencias Python
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip3 install --break-system-packages --no-cache-dir -r requirements.txt
 
 COPY app .
 
-EXPOSE 8500
+EXPOSE 8400
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8500"]
-
+CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8400"]
