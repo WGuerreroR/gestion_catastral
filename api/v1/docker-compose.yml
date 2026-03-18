@@ -1,0 +1,9 @@
+version: '3'
+services:
+  api_v1:
+    build: .
+    volumes:
+      - ./app/:/app/ 
+    working_dir: /app  
+    ports:
+      - "8500:8500"
