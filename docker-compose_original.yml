@@ -1,12 +1,30 @@
-version: '3'
 services:
   api_v1:
+    platform: linux/amd64   # ← forzar emulación amd64 en Apple Silicon
     build:
       context: ./api/v1
       dockerfile: Dockerfile
     volumes:
       - ./api/v1/app/:/app/
       - ./data/qgis/:/app/data/
-    working_dir: /app  
+    working_dir: /app
     ports:
-      - "8400:8500"
+      - "8400:8400"
+      
+  app:
+    build: ./webapp
+    ports:
+      - "80:80"
+    restart: always
+
+  db:
+    image: postgis/postgis:18-3.6-alpine
+    restart: always
+    volumes:
+      - ./data/postgis:/var/lib/postgresql/data
+    ports:
+      - "5533:5432"
+    environment:
+      - POSTGRES_DB=CHIQUINQUIRA
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=chiquinquira

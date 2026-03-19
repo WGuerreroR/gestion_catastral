@@ -8,6 +8,7 @@ import DashboardIcon     from '@mui/icons-material/Dashboard'
 import PeopleIcon        from '@mui/icons-material/People'
 import AdminPanelIcon    from '@mui/icons-material/AdminPanelSettings'
 import AssignmentIcon    from '@mui/icons-material/Assignment'
+import FactCheckIcon        from '@mui/icons-material/FactCheck' 
 import MapIcon           from '@mui/icons-material/Map'
 import ChevronLeftIcon   from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon  from '@mui/icons-material/ChevronRight'
@@ -22,12 +23,12 @@ export const SIDEBAR_WIDTH_CLOSED = 64
 
 
 const menuItems = [
-    {
-      label: 'Dashboard',
-      path:  '/dashboard',
-      icon:  <DashboardIcon />,
-      roles: ['administrador', 'gerente', 'lider', 'ejecutor']
-    },
+  {
+    label: 'Asignaciones',
+    path:  '/asignaciones',
+    icon:  <AssignmentIcon />,
+    roles: ['administrador', 'gerente', 'lider', 'ejecutor']
+  },
     {
       label: 'Personas',
       path:  '/personas',
@@ -41,9 +42,15 @@ const menuItems = [
       roles: ['administrador']
     },
     {
-      label: 'Asignaciones',
-      path:  '/asignaciones',
-      icon:  <AssignmentIcon />,
+      label: 'Calidad',
+      path:  '/calidad',
+      icon:  <FactCheckIcon />,
+      roles: ['administrador']
+    },
+    {
+      label: 'Dashboard',
+      path:  '/dashboard',
+      icon:  <DashboardIcon />,
       roles: ['administrador', 'gerente', 'lider', 'ejecutor']
     }
   ]

@@ -10,7 +10,8 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import { useNavigate } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import { loginThunk, clearError } from '../store/slices/authSlice'
-
+import Logomini from '../assets/logo_mini.svg'
+import Logo from '../assets/ingicat.png'
 export default function Login() {
   const navigate  = useNavigate()
   const dispatch  = useDispatch()
@@ -54,23 +55,20 @@ export default function Login() {
       alignItems: 'center',
       justifyContent: 'center',
       bgcolor: 'background.default',
-      backgroundImage: 'linear-gradient(135deg, #1565C0 0%, #2E7D32 100%)',
+      backgroundImage: 'linear-gradient(135deg, #3E2723 0%, #D1B692 100%)',
     }}>
       <Card sx={{ width: 420, mx: 2 }}>
         <CardContent sx={{ p: 4 }}>
 
           {/* Header */}
           <Box sx={{ textAlign: 'center', mb: 4 }}>
-            <Box sx={{
-              width: 64, height: 64, borderRadius: '50%',
-              bgcolor: 'primary.main', display: 'flex',
-              alignItems: 'center', justifyContent: 'center',
-              mx: 'auto', mb: 2
-            }}>
-              <MapIcon sx={{ color: '#fff', fontSize: 32 }} />
-            </Box>
+          <img
+         src={Logo}
+         alt="Ingicat"
+         style={{ height: 60, width: 'auto' }}
+       />
             <Typography variant="h5" fontWeight={600}>
-              Gestión de Predios
+              Gestión predial
             </Typography>
             <Typography variant="body2" color="text.secondary" mt={0.5}>
               Ingresa tus credenciales para continuar

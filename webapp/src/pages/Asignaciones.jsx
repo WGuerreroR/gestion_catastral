@@ -15,6 +15,7 @@ import FolderIcon      from '@mui/icons-material/Folder'
 import SwapHorizIcon   from '@mui/icons-material/SwapHoriz'
 import WarningIcon     from '@mui/icons-material/Warning'
 import AssignmentIcon  from '@mui/icons-material/Assignment'
+import DownloadIcon    from '@mui/icons-material/Download'
 import { useNavigate } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import api from '../api/axios'
@@ -46,6 +47,7 @@ export default function Asignaciones() {
   const [error,        setError]        = useState('')
   const [success,      setSuccess]      = useState('')
   const [seleccionado, setSeleccionado] = useState(null)
+  const [descargando,  setDescargando]  = useState(false)   // ← nuevo
 
   // Modal crear/editar
   const [modalOpen,  setModalOpen]  = useState(false)
@@ -104,6 +106,30 @@ export default function Asignaciones() {
       setConfirmando(false)
     }
   }
+
+  // ── Descargar proyecto QField ───────────────────────────
+  const handleDescargar = async (proyecto) => {
+    setDescargando(true)
+    try {
+      const response = await api.get(
+        `/proyectos/clave/${proyecto.clave_proyecto}/descarga`,
+        { responseType: 'blob' }
+      )
+      const url  = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href     = url
+      link.download = `${proyecto.clave_proyecto}.zip`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      mostrarError('Error descargando el proyecto')
+    } finally {
+      setDescargando(false)
+    }
+  }
+   
 
   // ── Crear / Editar ──────────────────────────────────────
   const abrirCrear = () => {
@@ -239,19 +265,11 @@ export default function Asignaciones() {
     {
       field:      'acciones',
       headerName: 'Acciones',
-      width:      220,
+      width:      260,
       sortable:   false,
       renderCell: ({ row }) => (
         <Stack direction="row" spacing={0.5} alignItems="center">
-          <Tooltip title="Ver predios">
-            <IconButton
-              size="small"
-              color="primary"
-              onClick={() => navigate(`/asignaciones/${row.id}`)}
-            >
-              <MapIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
+          
           {puedeAdmin && (
             <>
               <Tooltip title="Asignar predios">
@@ -312,8 +330,8 @@ export default function Asignaciones() {
       {error   && <Alert severity="error"   sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>{success}</Alert>}
 
-     {/* Detalle del proyecto seleccionado */}
-     {seleccionado && (
+      {/* Detalle del proyecto seleccionado */}
+      {seleccionado && (
         <Card sx={{ mt: 3 }}>
           <CardContent>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -328,13 +346,24 @@ export default function Asignaciones() {
                   color={coloresEstado[seleccionado.estado] || 'default'}
                 />
               </Box>
-              <Button
-                variant="outlined"
-                startIcon={<MapIcon />}
-                onClick={() => navigate(`/asignaciones/${seleccionado.id}`)}
-              >
-                Ver detalle
-              </Button>
+              {/* ── Botones Ver detalle + Descargar ── */}
+              <Stack direction="row" spacing={1}>
+                <Button
+                  variant="outlined"
+                  startIcon={descargando ? <CircularProgress size={16} /> : <DownloadIcon />}
+                  onClick={() => handleDescargar(seleccionado)}
+                  disabled={descargando}
+                >
+                  {descargando ? 'Descargando...' : 'Descargar proyecto'}
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<MapIcon />}
+                  onClick={() => navigate(`/asignaciones/${seleccionado.id}`)}
+                >
+                  Ver detalle
+                </Button>
+              </Stack>
             </Box>
 
             <Divider sx={{ mb: 2 }} />
@@ -381,7 +410,8 @@ export default function Asignaciones() {
         </Card>
       )}
 
-<br/>
+      <br />
+
       {/* Tabla */}
       <DataGrid
         rows={proyectos}
@@ -393,78 +423,73 @@ export default function Asignaciones() {
         onRowClick={({ row }) => setSeleccionado(row)}
         disableRowSelectionOnClick={false}
         sx={{
-            bgcolor: 'background.paper',
-            borderRadius: 2,
-            '& .MuiDataGrid-row': { cursor: 'pointer' },
-            '& .MuiDataGrid-row.Mui-selected': {
+          bgcolor: 'background.paper',
+          borderRadius: 2,
+          '& .MuiDataGrid-row': { cursor: 'pointer' },
+          '& .MuiDataGrid-row.Mui-selected': {
             bgcolor: 'secundary.main',
             '&:hover': { bgcolor: 'secundary.main' }
-            }
+          }
         }}
-        />
+      />
 
- 
-
-    {/* ── Modal Crear / Editar ─────────────────────────── */}
-    <Dialog open={modalOpen} onClose={() => setModalOpen(false)} maxWidth="sm" fullWidth>
-      <DialogTitle>{editando ? 'Editar proyecto' : 'Nuevo proyecto'}</DialogTitle>
-      <DialogContent>
-        <Stack spacing={2} sx={{ mt: 1 }}>
-          <TextField
-            label="Clave del proyecto"
-            value={form.clave_proyecto}
-            onChange={e => setForm({ ...form, clave_proyecto: e.target.value })}
-            disabled={!!editando}
-            fullWidth required
-            helperText="Ejemplo: PRY-2024-001"
-          />
-          <TextField
-            label="Descripción"
-            value={form.descripcion}
-            onChange={e => setForm({ ...form, descripcion: e.target.value })}
-            fullWidth multiline rows={3}
-          />
-
-          {/* Estado solo visible al editar — al crear siempre será "campo" */}
-          {editando && (
+      {/* ── Modal Crear / Editar ─────────────────────────── */}
+      <Dialog open={modalOpen} onClose={() => setModalOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>{editando ? 'Editar proyecto' : 'Nuevo proyecto'}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              label="Clave del proyecto"
+              value={form.clave_proyecto}
+              onChange={e => setForm({ ...form, clave_proyecto: e.target.value })}
+              disabled={!!editando}
+              fullWidth required
+              helperText="Ejemplo: PRY-2024-001"
+            />
+            <TextField
+              label="Descripción"
+              value={form.descripcion}
+              onChange={e => setForm({ ...form, descripcion: e.target.value })}
+              fullWidth multiline rows={3}
+            />
+            {editando && (
+              <TextField
+                select fullWidth
+                label="Estado"
+                value={form.estado}
+                onChange={e => setForm({ ...form, estado: e.target.value })}
+              >
+                <MenuItem value="campo">Campo</MenuItem>
+                <MenuItem value="validacion">Validación</MenuItem>
+                <MenuItem value="finalizado">Finalizado</MenuItem>
+              </TextField>
+            )}
             <TextField
               select fullWidth
-              label="Estado"
-              value={form.estado}
-              onChange={e => setForm({ ...form, estado: e.target.value })}
+              label="Responsable"
+              value={form.responsable_id}
+              onChange={e => setForm({ ...form, responsable_id: e.target.value })}
+              required
             >
-              <MenuItem value="campo">Campo</MenuItem>
-              <MenuItem value="validacion">Validación</MenuItem>
-              <MenuItem value="finalizado">Finalizado</MenuItem>
+              {personas.map(p => (
+                <MenuItem key={p.id} value={p.id}>
+                  {p.primer_nombre} {p.primer_apellido} — {(p.roles || []).join(', ')}
+                </MenuItem>
+              ))}
             </TextField>
-          )}
-
-          <TextField
-            select fullWidth
-            label="Responsable"
-            value={form.responsable_id}
-            onChange={e => setForm({ ...form, responsable_id: e.target.value })}
-            required
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setModalOpen(false)}>Cancelar</Button>
+          <Button
+            variant="contained"
+            onClick={handleGuardar}
+            disabled={guardando || !form.clave_proyecto || !form.responsable_id}
           >
-            {personas.map(p => (
-              <MenuItem key={p.id} value={p.id}>
-                {p.primer_nombre} {p.primer_apellido} — {(p.roles || []).join(', ')}
-              </MenuItem>
-            ))}
-          </TextField>
-        </Stack>
-      </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={() => setModalOpen(false)}>Cancelar</Button>
-        <Button
-          variant="contained"
-          onClick={handleGuardar}
-          disabled={guardando || !form.clave_proyecto || !form.responsable_id}
-        >
-          {guardando ? <CircularProgress size={20} /> : 'Guardar'}
-        </Button>
-      </DialogActions>
-    </Dialog>
+            {guardando ? <CircularProgress size={20} /> : 'Guardar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* ── Modal Cambiar Responsable ────────────────────── */}
       <Dialog open={modalResp} onClose={() => setModalResp(false)} maxWidth="xs" fullWidth>

@@ -11,6 +11,7 @@ import TableChartIcon from '@mui/icons-material/TableChart'
 import AssignmentIcon from '@mui/icons-material/Assignment'
 import PersonIcon     from '@mui/icons-material/Person'
 import FolderIcon     from '@mui/icons-material/Folder'
+import DownloadIcon   from '@mui/icons-material/Download'
 import Map          from 'ol/Map'
 import View         from 'ol/View'
 import TileLayer    from 'ol/layer/Tile'
@@ -35,7 +36,7 @@ const coloresEstado = {
   campo:      { fill: 'rgba(255,0,200,0.4)',  stroke: '#F57C00' },
   validado:   { fill: 'rgba(33,150,243,0.4)', stroke: '#1565C0' },
   finalizado: { fill: 'rgba(76,175,80,0.4)',  stroke: '#2E7D32' },
-  sin_asignar:{ fill: 'rgba(255,152,0,0.4)',stroke:'#F57C00' }
+  sin_asignar:{ fill: 'rgba(255,152,0,0.4)',  stroke: '#F57C00' }
 }
 
 const chipEstado = {
@@ -44,7 +45,6 @@ const chipEstado = {
   finalizado: 'success',
 }
 
-// Estilo del área del proyecto: borde azul punteado, relleno muy tenue
 const estiloArea = new Style({
   fill:   new Fill({ color: 'rgba(25, 118, 210, 0.08)' }),
   stroke: new Stroke({ color: '#1976D2', width: 2.5, lineDash: [8, 4] })
@@ -67,9 +67,9 @@ export default function AsignacionDetalle() {
   const mapRef          = useRef(null)
   const mapInstance     = useRef(null)
   const prediosLayerRef = useRef(null)
-  const areaLayerRef    = useRef(null)    // ← capa área proyecto
+  const areaLayerRef    = useRef(null)
   const geojsonCargado  = useRef(false)
-  const areaCargada     = useRef(false)   // ← evitar recargar área
+  const areaCargada     = useRef(false)
 
   const [tab,          setTab]          = useState(0)
   const [proyecto,     setProyecto]     = useState(null)
@@ -79,6 +79,7 @@ export default function AsignacionDetalle() {
   const [success,      setSuccess]      = useState('')
   const [predioActivo, setPredioActivo] = useState(null)
   const [tieneArea,    setTieneArea]    = useState(false)
+  const [descargando,  setDescargando]  = useState(false)  // ← nuevo
 
   const [modalMetodo,    setModalMetodo]    = useState(false)
   const [modalMapa,      setModalMapa]      = useState(false)
@@ -108,20 +109,42 @@ export default function AsignacionDetalle() {
 
   useEffect(() => { cargarDatos() }, [cargarDatos])
 
+  // ── Descargar proyecto ────────────────────────────────────
+  const handleDescargar = async () => {
+    if (!proyecto?.clave_proyecto) return
+    setDescargando(true)
+    try {
+      const response = await api.get(
+        `/proyectos/clave/${proyecto.clave_proyecto}/descarga`,
+        { responseType: 'blob' }
+      )
+      const url  = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href     = url
+      link.download = `${proyecto.clave_proyecto}.zip`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      mostrarError('Error descargando el proyecto')
+    } finally {
+      setDescargando(false)
+    }
+  }
+
   // ── Inicializar mapa la PRIMERA vez que se abre el tab ───
   useEffect(() => {
     if (tab !== 1) return
     if (!mapRef.current) return
 
     if (!mapInstance.current) {
-      // Capa área del proyecto (debajo de los predios)
       areaLayerRef.current = new VectorLayer({
         source: new VectorSource(),
         style:  estiloArea,
         zIndex: 1
       })
 
-      // Capa predios (encima)
       prediosLayerRef.current = new VectorLayer({
         source: new VectorSource(),
         style:  (feature) => estiloPredioPorEstado(feature.get('estado')),
@@ -143,7 +166,6 @@ export default function AsignacionDetalle() {
 
       const selectInteraction = new Select({ condition: click })
       selectInteraction.on('select', (e) => {
-        // Solo activar panel si el feature es un predio (tiene npn)
         if (e.selected.length > 0) {
           const props = e.selected[0].getProperties()
           setPredioActivo(props?.npn ? props : null)
@@ -164,7 +186,6 @@ export default function AsignacionDetalle() {
       }
     }
 
-    // Cada vez que volvemos al tab: recalcular tamaño
     setTimeout(() => {
       mapInstance.current?.updateSize()
       const source = prediosLayerRef.current?.getSource()
@@ -208,7 +229,6 @@ export default function AsignacionDetalle() {
       const { data } = await api.get(`/proyectos/${id}/area`)
       const source = areaLayerRef.current.getSource()
       source.clear()
-      // El endpoint devuelve un GeoJSON Feature
       const features = new GeoJSON().readFeatures(data, {
         featureProjection: 'EPSG:3857',
         dataProjection:    'EPSG:4326'
@@ -217,12 +237,10 @@ export default function AsignacionDetalle() {
       areaCargada.current = true
       setTieneArea(true)
     } catch {
-      // El proyecto puede no tener área definida aún — no es error crítico
       setTieneArea(false)
     }
   }, [id])
 
-  // Si los predios llegan después de que el mapa ya está abierto
   useEffect(() => {
     if (tab === 1 && mapInstance.current && predios.length > 0 && !geojsonCargado.current) {
       cargarGeojson()
@@ -230,7 +248,6 @@ export default function AsignacionDetalle() {
     }
   }, [predios, tab, cargarGeojson, cargarArea])
 
-  // ── Destruir al desmontar ────────────────────────────────
   useEffect(() => {
     return () => {
       if (mapInstance.current) {
@@ -242,10 +259,10 @@ export default function AsignacionDetalle() {
 
   // ── Columnas tabla ───────────────────────────────────────
   const columnas = [
-    { field: 'npn',           headerName: 'NPN',       width: 200 },
-    { field: 'nombre_predio', headerName: 'Indentficación',     width: 200  },
-    { field: 'municipio',     headerName: 'Municipio', width: 140 },
-    { field: 'responsable', headerName: 'Responsable', width: 180 },
+    { field: 'npn',           headerName: 'NPN',             width: 200 },
+    { field: 'nombre_predio', headerName: 'Identificación',  width: 200 },
+    { field: 'municipio',     headerName: 'Municipio',       width: 140 },
+    { field: 'responsable',   headerName: 'Responsable',     width: 180 },
     {
       field: 'estado', headerName: 'Estado', width: 120,
       renderCell: ({ value }) => (
@@ -290,15 +307,27 @@ export default function AsignacionDetalle() {
             {proyecto?.descripcion || 'Sin descripción'}
           </Typography>
         </Box>
-        {puedeAdmin && (
+
+        {/* ── Botones header ── */}
+        <Stack direction="row" spacing={1}>
           <Button
-            variant="contained"
-            startIcon={<AssignmentIcon />}
-            onClick={() => setModalMetodo(true)}
+            variant="outlined"
+            startIcon={descargando ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
+            onClick={handleDescargar}
+            disabled={descargando}
           >
-            Asignar predios
+            {descargando ? 'Descargando...' : 'Descargar proyecto'}
           </Button>
-        )}
+          {puedeAdmin && (
+            <Button
+              variant="contained"
+              startIcon={<AssignmentIcon />}
+              onClick={() => setModalMetodo(true)}
+            >
+              Asignar predios
+            </Button>
+          )}
+        </Stack>
       </Box>
 
       {/* Alertas */}
@@ -367,7 +396,6 @@ export default function AsignacionDetalle() {
 
       {/* ── Tab Mapa — siempre en DOM, visibilidad por CSS ── */}
       <Box sx={{ display: tab === 1 ? 'flex' : 'none', gap: 2 }}>
-
         <Box sx={{
           flexGrow: 1,
           height:   MAP_HEIGHT,
@@ -377,17 +405,13 @@ export default function AsignacionDetalle() {
           border: '1px solid',
           borderColor: 'divider'
         }}>
-          <div
-            ref={mapRef}
-            style={{ width: '100%', height: `${MAP_HEIGHT}px` }}
-          />
+          <div ref={mapRef} style={{ width: '100%', height: `${MAP_HEIGHT}px` }} />
 
           {/* Leyenda */}
           <Card sx={{
             position: 'absolute', bottom: 16, left: 16,
             zIndex: 1000, p: 1.5, minWidth: 150
           }}>
-            
             {tieneArea && (
               <>
                 <Divider sx={{ my: 1 }} />

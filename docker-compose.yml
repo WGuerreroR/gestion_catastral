@@ -10,21 +10,3 @@ services:
     working_dir: /app
     ports:
       - "8400:8400"
-      
-  app:
-    build: ./webapp
-    ports:
-      - "80:80"
-    restart: always
-
-  db:
-    image: postgis/postgis:18-3.6-alpine
-    restart: always
-    volumes:
-      - ./data/postgis:/var/lib/postgresql/data
-    ports:
-      - "5533:5432"
-    environment:
-      - POSTGRES_DB=CHIQUINQUIRA
-      - POSTGRES_USER=admin
-      - POSTGRES_PASSWORD=chiquinquira

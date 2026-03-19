@@ -219,7 +219,7 @@ def _generar_y_guardar(db: Session, proyecto_id: int, clave: str) -> str:
     return zip_path
  
  
-@router.get("/clave/{id}/descarga")
+@router.get("/id/{id}/descarga")
 def descargar_proyecto_por_id(
     id: int,
     db: Session = Depends(get_db),
@@ -277,7 +277,7 @@ def _autenticar_qfield(db: Session, credentials: HTTPBasicCredentials, token: st
     # ── Basic Auth ────────────────────────────────────────────────────────────
     if credentials and credentials.username:
         persona = persona_repo.get_by_identificacion(db, credentials.username)
-        if not persona or not verify_password(credentials.password, persona["password_hash"]):
+        if not persona or not verify_password(credentials.password, persona.password_hash):
             raise HTTPException(
                 status_code=401,
                 detail="Credenciales inválidas",

@@ -1,6 +1,6 @@
 from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
-from routers import auth, personas, roles, asignaciones, predios,asignacion_proyecto,spatial
+from routers import auth, personas, roles, asignaciones, predios,asignacion_proyecto,spatial,calidad
 
 app = FastAPI(title="Gestión Predial Chiquinquirá",
  version="1.0.0",
@@ -22,6 +22,7 @@ app.include_router(asignaciones.router, prefix="/api/v1")
 app.include_router(predios.router, prefix="/api/v1")
 app.include_router(asignacion_proyecto.router, prefix="/api/v1")
 app.include_router(spatial.router, prefix="/api/v1")
+app.include_router(calidad.router, prefix="/api/v1")
 router = APIRouter()
 @router.get("/")
 def root():
