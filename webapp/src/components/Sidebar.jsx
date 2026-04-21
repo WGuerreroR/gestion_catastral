@@ -9,6 +9,7 @@ import PeopleIcon        from '@mui/icons-material/People'
 import AdminPanelIcon    from '@mui/icons-material/AdminPanelSettings'
 import AssignmentIcon    from '@mui/icons-material/Assignment'
 import FactCheckIcon        from '@mui/icons-material/FactCheck' 
+import TravelExploreIcon from '@mui/icons-material/TravelExplore'
 import MapIcon           from '@mui/icons-material/Map'
 import ChevronLeftIcon   from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon  from '@mui/icons-material/ChevronRight'
@@ -42,11 +43,18 @@ const menuItems = [
       roles: ['administrador']
     },
     {
-      label: 'Calidad',
-      path:  '/calidad',
+      label: 'Validación',
+      path:  '/validacion',
       icon:  <FactCheckIcon />,
       roles: ['administrador']
     },
+    {
+      label: 'Calidad Externa',
+      path:  '/calidad-externa',
+      icon:  <TravelExploreIcon />,
+      roles: ['administrador']
+    },
+
     {
       label: 'Dashboard',
       path:  '/dashboard',

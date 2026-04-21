@@ -7,8 +7,11 @@ import Personas       from './pages/Personas'
 import Roles         from './pages/Roles'
 import Asignaciones         from './pages/Asignaciones'
 import AsignacionDetalle        from './pages/AsignacionDetalle'
-import Calidad       from './pages/Calidad'
+import Validacion       from './pages/Validacion'
 import Perfil         from './pages/Perfil'
+import CalidadExterna        from './pages/CalidadExterna'
+import CalidadExternaCrear   from './pages/CalidadExternaCrear'
+import CalidadExternaDetalle from './pages/CalidadExternaDetalle'
 import ProtectedRoute from './components/ProtectedRoute'
 import Sidebar, { SIDEBAR_WIDTH, SIDEBAR_WIDTH_CLOSED } from './components/Sidebar'
 import Navbar         from './components/Navbar'
@@ -58,7 +61,10 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard"    element={<Layout><Dashboard /></Layout>} />
         <Route path="/personas"     element={<Layout><Personas /></Layout>} />
-        <Route path="/calidad"     element={<Layout><Calidad /></Layout>} />
+        <Route path="/validacion"     element={<Layout><Validacion /></Layout>} />
+        <Route path="/calidad-externa"          element={<Layout><CalidadExterna /></Layout>} />
+        <Route path="/calidad-externa/crear"    element={<Layout><CalidadExternaCrear /></Layout>} />
+        <Route path="/calidad-externa/:id"      element={<Layout><CalidadExternaDetalle /></Layout>} />
         <Route path="/roles"        element={<Layout><Roles /></Layout>} />
         <Route path="/asignaciones" element={<Layout><Asignaciones /></Layout>} />
         <Route path="/asignaciones/:id" element={<Layout><AsignacionDetalle /></Layout>} />

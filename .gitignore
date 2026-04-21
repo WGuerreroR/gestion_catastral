@@ -6,3 +6,6 @@ api/v1/app/core/__pycache__/*
 api/v1/app/routers/__pycache__/*
 api/v1/app/schemas/__pycache__/*
 api/v1/app/services/__pycache__/*
+api/v1/app/utils/__pycache__/*
+.DS_Store
+.DS_Store

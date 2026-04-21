@@ -59,7 +59,7 @@ export default function Navbar({ sidebarOpen }) {
         >
           <MapIcon color="primary" />
           <Typography variant="h6" fontWeight={600}>
-            Gestión Predial
+            Gestión Catastral
           </Typography>
         </Box>
 

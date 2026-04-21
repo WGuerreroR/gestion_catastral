@@ -68,7 +68,7 @@ export default function Login() {
          style={{ height: 60, width: 'auto' }}
        />
             <Typography variant="h5" fontWeight={600}>
-              Gestión predial
+              Gestión Catastral
             </Typography>
             <Typography variant="body2" color="text.secondary" mt={0.5}>
               Ingresa tus credenciales para continuar
