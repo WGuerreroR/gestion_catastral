@@ -49,3 +49,17 @@ class AsignacionProyectoResponse(BaseModel):
 
 class CambioResponsable(BaseModel):
     responsable_id: int
+
+
+class QFieldStatusResponse(BaseModel):
+    proyecto_id:       int
+    cloud_project_id:  Optional[str] = None
+    nombre:            str
+    estado:            str            # "sincronizado" | "desactualizado" | "sin_cloud"
+    url_cloud:         Optional[str] = None
+
+
+class QFieldSincronizarResponse(BaseModel):
+    mensaje:           str
+    cloud_project_id:  str
+    url_cloud:         str

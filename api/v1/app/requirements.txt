@@ -6,3 +6,5 @@ python-jose==3.5.0
 bcrypt==4.0.1
 passlib==1.7.4
 python-dotenv==1.2.2
+qfieldcloud-sdk==0.15.0
+python-multipart>=0.0.9

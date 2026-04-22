@@ -257,11 +257,84 @@ def get_area_geojson(db: Session, proyecto_id: int):
  
     if not resultado or not resultado.geojson:
         return None
- 
+
     # Devolver como Feature para que el frontend lo trate igual que el GeoJSON de predios
     return {
         "type": "Feature",
         "geometry": json.loads(resultado.geojson),
         "properties": {"proyecto_id": proyecto_id}
     }
- 
+
+
+def actualizar_estado_predio(db, asignacion_id: int, proyecto_id: int, estado: str):
+    db.execute(text("""
+        UPDATE admin_persona_predio
+        SET estado = :estado, fecha_actualizacion = NOW()
+        WHERE id = :id AND proyecto_id = :pid
+    """), {"estado": estado, "id": asignacion_id, "pid": proyecto_id})
+    db.commit()
+
+
+def get_predios_ids(db, proyecto_id: int) -> list:
+    """Devuelve la lista de id_operacion asignados al proyecto."""
+    rows = db.execute(text("""
+        SELECT id_operacion
+        FROM admin_persona_predio
+        WHERE proyecto_id = :id
+    """), {"id": proyecto_id}).fetchall()
+    return [r.id_operacion for r in rows]
+
+
+def guardar_qfield_cloud_id(db, proyecto_id: int, cloud_id: str):
+    """Persiste el ID del proyecto en QField Cloud."""
+    db.execute(text("""
+        UPDATE admin_asignacion
+        SET qfield_cloud_project_id = :cloud_id
+        WHERE id = :id
+    """), {"cloud_id": cloud_id, "id": proyecto_id})
+    db.commit()
+
+
+def get_qfield_cloud_id(db, proyecto_id: int):
+    """Devuelve el ID del proyecto en QField Cloud, o None si no existe."""
+    row = db.execute(text("""
+        SELECT qfield_cloud_project_id
+        FROM admin_asignacion
+        WHERE id = :id
+    """), {"id": proyecto_id}).fetchone()
+    return row.qfield_cloud_project_id if row else None
+
+
+def actualizar_estado_generacion(db, proyecto_id: int, estado: str, error: str | None = None):
+    db.execute(text("""
+        UPDATE admin_asignacion
+        SET estado_generacion = :estado, error_generacion = :error
+        WHERE id = :id
+    """), {"estado": estado, "error": error, "id": proyecto_id})
+    db.commit()
+
+
+def get_estado_generacion(db, proyecto_id: int) -> dict:
+    row = db.execute(text("""
+        SELECT id, clave_proyecto, estado_generacion, error_generacion
+        FROM admin_asignacion
+        WHERE id = :id
+    """), {"id": proyecto_id}).fetchone()
+    if not row:
+        return None
+    return {
+        "proyecto_id":       row.id,
+        "clave":             row.clave_proyecto,
+        "estado_generacion": row.estado_generacion,
+        "error_generacion":  row.error_generacion,
+    }
+
+
+def get_area_wkt_9377(db, proyecto_id: int) -> str | None:
+    """Devuelve area_geom del proyecto como WKT en EPSG:9377, o None."""
+    row = db.execute(text("""
+        SELECT ST_AsText(area_geom) AS wkt
+        FROM admin_asignacion
+        WHERE id = :id AND area_geom IS NOT NULL
+    """), {"id": proyecto_id}).fetchone()
+    return row.wkt if row else None

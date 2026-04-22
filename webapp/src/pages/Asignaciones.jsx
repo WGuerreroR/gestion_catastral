@@ -47,7 +47,11 @@ export default function Asignaciones() {
   const [error,        setError]        = useState('')
   const [success,      setSuccess]      = useState('')
   const [seleccionado, setSeleccionado] = useState(null)
-  const [descargando,  setDescargando]  = useState(false)   // ← nuevo
+
+  // Descargas del proyecto seleccionado
+  const [descargando,    setDescargando]    = useState(false)
+  const [descargandoQGZ, setDescargandoQGZ] = useState(false)
+  const [estadoOffline,  setEstadoOffline]  = useState(null)
 
   // Modal crear/editar
   const [modalOpen,  setModalOpen]  = useState(false)
@@ -92,6 +96,62 @@ export default function Asignaciones() {
   const mostrarError   = (msg) => { setError(msg);   setTimeout(() => setError(''),   4000) }
   const mostrarSuccess = (msg) => { setSuccess(msg); setTimeout(() => setSuccess(''), 4000) }
 
+  // ── Estado offline del proyecto seleccionado (para condicionar botón) ──
+  const cargarEstadoOffline = async (proyectoId) => {
+    try {
+      const { data } = await api.get(`/proyectos/${proyectoId}/estado-generacion`)
+      setEstadoOffline(data)
+    } catch {
+      setEstadoOffline(null)
+    }
+  }
+
+  // ── Descargar proyecto offline (.zip) ───────────────────
+  const handleDescargar = async (proyecto) => {
+    setDescargando(true)
+    try {
+      const response = await api.get(
+        `/proyectos/clave/${proyecto.clave_proyecto}/descarga`,
+        { responseType: 'blob' }
+      )
+      const url  = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href     = url
+      link.download = `${proyecto.clave_proyecto}_offline.zip`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      mostrarError('Error descargando el proyecto offline')
+    } finally {
+      setDescargando(false)
+    }
+  }
+
+  // ── Descargar área (proyecto QGIS con PostGIS vivo) ─────
+  const handleDescargarQGZ = async (proyecto) => {
+    setDescargandoQGZ(true)
+    try {
+      const response = await api.get(
+        `/proyectos/${proyecto.id}/descargar-proyecto-qgis`,
+        { responseType: 'blob' }
+      )
+      const url  = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href     = url
+      link.download = `${proyecto.clave_proyecto}.zip`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (e) {
+      mostrarError(getErrorMessage(e, 'Error descargando área'))
+    } finally {
+      setDescargandoQGZ(false)
+    }
+  }
+
   const confirmar = ({ titulo, mensaje, onConfirm }) => {
     setConfirmData({ titulo, mensaje, onConfirm })
     setModalConfirm(true)
@@ -107,29 +167,7 @@ export default function Asignaciones() {
     }
   }
 
-  // ── Descargar proyecto QField ───────────────────────────
-  const handleDescargar = async (proyecto) => {
-    setDescargando(true)
-    try {
-      const response = await api.get(
-        `/proyectos/clave/${proyecto.clave_proyecto}/descarga`,
-        { responseType: 'blob' }
-      )
-      const url  = window.URL.createObjectURL(new Blob([response.data]))
-      const link = document.createElement('a')
-      link.href     = url
-      link.download = `${proyecto.clave_proyecto}.zip`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      window.URL.revokeObjectURL(url)
-    } catch {
-      mostrarError('Error descargando el proyecto')
-    } finally {
-      setDescargando(false)
-    }
-  }
-   
+
 
   // ── Crear / Editar ──────────────────────────────────────
   const abrirCrear = () => {
@@ -346,16 +384,28 @@ export default function Asignaciones() {
                   color={coloresEstado[seleccionado.estado] || 'default'}
                 />
               </Box>
-              {/* ── Botones Ver detalle + Descargar ── */}
               <Stack direction="row" spacing={1}>
+                {estadoOffline?.estado_generacion === 'terminado' && estadoOffline?.archivo_existe && (
+                  <Button
+                    variant="outlined"
+                    startIcon={descargando ? <CircularProgress size={16} /> : <DownloadIcon />}
+                    onClick={() => handleDescargar(seleccionado)}
+                    disabled={descargando}
+                  >
+                    {descargando ? 'Descargando...' : 'Descargar offline'}
+                  </Button>
+                )}
+
                 <Button
                   variant="outlined"
-                  startIcon={descargando ? <CircularProgress size={16} /> : <DownloadIcon />}
-                  onClick={() => handleDescargar(seleccionado)}
-                  disabled={descargando}
+                  color="secondary"
+                  startIcon={descargandoQGZ ? <CircularProgress size={16} /> : <MapIcon />}
+                  onClick={() => handleDescargarQGZ(seleccionado)}
+                  disabled={descargandoQGZ}
                 >
-                  {descargando ? 'Descargando...' : 'Descargar proyecto'}
+                  {descargandoQGZ ? 'Descargando...' : 'Descargar área'}
                 </Button>
+
                 <Button
                   variant="outlined"
                   startIcon={<MapIcon />}
@@ -420,7 +470,10 @@ export default function Asignaciones() {
         autoHeight
         pageSizeOptions={[10, 25, 50]}
         initialState={{ pagination: { paginationModel: { pageSize: 10 } } }}
-        onRowClick={({ row }) => setSeleccionado(row)}
+        onRowClick={({ row }) => {
+          setSeleccionado(row)
+          cargarEstadoOffline(row.id)
+        }}
         disableRowSelectionOnClick={false}
         sx={{
           bgcolor: 'background.paper',

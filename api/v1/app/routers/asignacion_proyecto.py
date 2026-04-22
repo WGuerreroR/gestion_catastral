@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
@@ -6,12 +6,18 @@ from typing import List, Optional
 from db.database import get_db
 from core.deps import get_current_user, require_roles
 from core.security import verify_password
-from services.qgis_export_service import generar_paquete_proyecto
+from fastapi import BackgroundTasks
+from services.qgis_export_service import (
+    generar_paquete_proyecto, tarea_generar_proyecto, _comprimir_a_exports,generar_paquete_proyecto_2,
+    _limpiar_recursos_anteriores, recursos_offline_existen,
+)
 from repositories import asignacion_proyecto_repo,persona_repo
 from schemas.asignacion_proyecto import (
     AsignacionProyectoCreate, AsignacionProyectoUpdate,
-    AsignacionProyectoResponse, CambioResponsable
+    AsignacionProyectoResponse, CambioResponsable,
+    QFieldStatusResponse, QFieldSincronizarResponse,
 )
+from services.qfield_cloud_service import QFieldCloudService
 from pydantic import BaseModel
 import json
 import os
@@ -117,13 +123,15 @@ def cambiar_responsable(
 @router.post("/confirmar-asignacion")
 def confirmar_asignacion(
     data: ConfirmarAsignacion,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user=Depends(require_roles("administrador", "supervisor"))
 ):
     if not data.id_operaciones:
         raise HTTPException(status_code=400, detail="No hay predios para asignar")
 
-    if not asignacion_proyecto_repo.get_by_id(db, data.proyecto_id):
+    proyecto = asignacion_proyecto_repo.get_by_id(db, data.proyecto_id)
+    if not proyecto:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
     # Guardar área según el método usado
@@ -146,10 +154,22 @@ def confirmar_asignacion(
         tipo=data.tipo_asignacion
     )
 
+    # Marcar como pendiente y lanzar generación en background
+    asignacion_proyecto_repo.actualizar_estado_generacion(db, data.proyecto_id, "pendiente")
+    """
+    background_tasks.add_task(
+        tarea_generar_proyecto,
+        data.proyecto_id,
+        proyecto["clave_proyecto"],
+        data.id_operaciones,
+    )
+    """
+
     return {
-        "mensaje":    f"{insertados} predios asignados exitosamente",
-        "insertados": insertados,
-        "duplicados": len(data.id_operaciones) - insertados
+        "mensaje":           f"{insertados} predios asignados exitosamente",
+        "insertados":        insertados,
+        "duplicados":        len(data.id_operaciones) - insertados,
+        "estado_generacion": "pendiente",
     }
 
 @router.put("/{proyecto_id}/predios/{asignacion_id}/estado")
@@ -166,13 +186,7 @@ def cambiar_estado_predio(
             status_code=400,
             detail=f"Estado inválido. Use: {estados_validos}"
         )
-    from sqlalchemy import text
-    db.execute(text("""
-        UPDATE admin_persona_predio
-        SET estado = :estado, fecha_actualizacion = NOW()
-        WHERE id = :id AND proyecto_id = :pid
-    """), {"estado": data.estado, "id": asignacion_id, "pid": proyecto_id})
-    db.commit()
+    asignacion_proyecto_repo.actualizar_estado_predio(db, asignacion_id, proyecto_id, data.estado)
     return {"mensaje": f"Estado actualizado a '{data.estado}'"}
 
 @router.delete("/{proyecto_id}/area")
@@ -190,8 +204,13 @@ def eliminar_proyecto(
     db: Session = Depends(get_db),
     user=Depends(require_roles("administrador"))
 ):
-    if not asignacion_proyecto_repo.get_by_id(db, proyecto_id):
+    proyecto = asignacion_proyecto_repo.get_by_id(db, proyecto_id)
+    if not proyecto:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+
+    # Borrar carpeta generada, zip de descarga y proyecto en QField Cloud
+    _limpiar_recursos_anteriores(db, proyecto_id, proyecto["clave_proyecto"])
+
     asignacion_proyecto_repo.delete(db, proyecto_id)
     return {"mensaje": "Proyecto eliminado"}
 
@@ -211,12 +230,9 @@ def get_area_proyecto(
 
  
 def _generar_y_guardar(db: Session, proyecto_id: int, clave: str) -> str:
-    """Genera el zip, lo guarda en disco y devuelve la ruta."""
-    zip_bytes = generar_paquete_proyecto(db, proyecto_id, clave)
-    zip_path  = _zip_path(clave)
-    with open(zip_path, "wb") as f:
-        f.write(zip_bytes)
-    return zip_path
+    """Genera el proyecto en el directorio permanente, crea el zip y devuelve su ruta."""
+    project_dir = generar_paquete_proyecto(db, proyecto_id, clave)
+    return _comprimir_a_exports(project_dir, clave)
  
  
 @router.get("/id/{id}/descarga")
@@ -226,26 +242,28 @@ def descargar_proyecto_por_id(
     current_user = Depends(get_current_user)
 ):
     proyecto = asignacion_proyecto_repo.get_by_id(db, id)
-    clave_proyecto = "archivo"
     if not proyecto:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
- 
-    try:
-        clave_proyecto = proyecto['clave_proyecto']
-        zip_path = _generar_y_guardar(db, id, clave_proyecto)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generando paquete: {e}")
- 
+
+    clave_proyecto = proyecto['clave_proyecto']
+    zip_path = _zip_path(clave_proyecto)
+
+    if not os.path.exists(zip_path):
+        try:
+            zip_path = _generar_y_guardar(db, id, clave_proyecto)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error generando paquete: {e}")
+
     return FileResponse(
         path=zip_path,
         media_type="application/zip",
-        filename=f"{clave_proyecto}.zip"
+        filename=f"{clave_proyecto}_offline.zip"
     )
- 
+
 
 @router.get("/clave/{clave_proyecto}/descarga")
 def descargar_proyecto_por_clave(
@@ -256,20 +274,23 @@ def descargar_proyecto_por_clave(
     ref = asignacion_proyecto_repo.get_by_clave(db, clave_proyecto)
     if not ref:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
- 
-    try:
-        zip_path = _generar_y_guardar(db, ref.id, clave_proyecto)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generando paquete: {e}")
- 
+
+    zip_path = _zip_path(clave_proyecto)
+
+    if not os.path.exists(zip_path):
+        try:
+            zip_path = _generar_y_guardar(db, ref.id, clave_proyecto)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error generando paquete: {e}")
+
     return FileResponse(
         path=zip_path,
         media_type="application/zip",
-        filename=f"{clave_proyecto}.zip"
+        filename=f"{clave_proyecto}_offline.zip"
     )
  
 
@@ -314,20 +335,20 @@ def descargar_proyecto_qfield(
     Usa cache si existe, genera si no.
     """
     _autenticar_qfield(db, credentials, token)
- 
+
     zip_path = _zip_path(clave_proyecto)
- 
+
     if os.path.exists(zip_path):
         return FileResponse(
             path=zip_path,
             media_type="application/zip",
-            filename=f"{clave_proyecto}.zip"
+            filename=f"{clave_proyecto}_offline.zip"
         )
- 
+
     ref = asignacion_proyecto_repo.get_by_clave(db, clave_proyecto)
     if not ref:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
- 
+
     try:
         zip_path = _generar_y_guardar(db, ref.id, clave_proyecto)
     except ValueError as e:
@@ -336,9 +357,265 @@ def descargar_proyecto_qfield(
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generando paquete: {e}")
- 
+
     return FileResponse(
         path=zip_path,
         media_type="application/zip",
-        filename=f"{clave_proyecto}.zip"
+        filename=f"{clave_proyecto}_offline.zip"
     )
+
+
+# ── Endpoints QField Cloud ────────────────────────────────────────────────────
+
+@router.get("/{proyecto_id}/qfield/status", response_model=QFieldStatusResponse)
+def qfield_status(
+    proyecto_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Consulta el estado del proyecto en QField Cloud.
+    Retorna 'sin_cloud' si el proyecto aún no ha sido sincronizado.
+    """
+    proyecto = asignacion_proyecto_repo.get_by_id(db, proyecto_id)
+    if not proyecto:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+
+    cloud_id = asignacion_proyecto_repo.get_qfield_cloud_id(db, proyecto_id)
+
+    if not cloud_id:
+        return QFieldStatusResponse(
+            proyecto_id=proyecto_id,
+            nombre=proyecto["clave_proyecto"],
+            estado="sin_cloud",
+        )
+
+    try:
+        cloud_svc = QFieldCloudService()
+        info = cloud_svc.get_status(cloud_id)
+        return QFieldStatusResponse(
+            proyecto_id=proyecto_id,
+            cloud_project_id=cloud_id,
+            nombre=proyecto["clave_proyecto"],
+            estado="sincronizado",
+            url_cloud=info.get("url"),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Error consultando QField Cloud: {exc}")
+
+
+@router.post("/{proyecto_id}/qfield/sincronizar", response_model=QFieldSincronizarResponse)
+def qfield_sincronizar(
+    proyecto_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(require_roles("administrador", "supervisor")),
+):
+    """
+    Regenera el paquete del proyecto y lo sincroniza con QField Cloud.
+    Actualiza el cloud_project_id en BD si cambia.
+    """
+    proyecto = asignacion_proyecto_repo.get_by_id(db, proyecto_id)
+    if not proyecto:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+
+    clave       = proyecto["clave_proyecto"]
+    predios_ids = asignacion_proyecto_repo.get_predios_ids(db, proyecto_id)
+
+    try:
+        project_dir = generar_paquete_proyecto(db, proyecto_id, clave, predios_ids)
+        _comprimir_a_exports(project_dir, clave)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Error generando paquete: {exc}")
+
+    try:
+        cloud_svc = QFieldCloudService()
+        cloud_id  = cloud_svc.crear_o_actualizar_proyecto(clave, project_dir)
+        asignacion_proyecto_repo.guardar_qfield_cloud_id(db, proyecto_id, cloud_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Error sincronizando con QField Cloud: {exc}")
+
+    url_cloud = f"{os.getenv('QFIELD_CLOUD_URL', 'https://app.qfield.cloud')}/projects/{cloud_id}/"
+
+    return QFieldSincronizarResponse(
+        mensaje=f"Proyecto '{clave}' sincronizado exitosamente con QField Cloud",
+        cloud_project_id=cloud_id,
+        url_cloud=url_cloud,
+    )
+
+
+@router.get("/{proyecto_id}/qfield/descargar")
+def qfield_descargar(
+    proyecto_id: int,
+    db: Session = Depends(get_db),
+    credentials: HTTPBasicCredentials = Depends(basic_auth),
+    token: str = Query(default=None, include_in_schema=False),
+):
+    """
+    Descarga el paquete QField del proyecto por ID.
+    Misma autenticación que /clave/{clave}/descarga/qfields (Basic Auth o ?token=<jwt>).
+    Usa el zip en disco si existe; lo genera si no.
+    """
+    _autenticar_qfield(db, credentials, token)
+
+    proyecto = asignacion_proyecto_repo.get_by_id(db, proyecto_id)
+    if not proyecto:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+
+    clave    = proyecto["clave_proyecto"]
+    zip_path = _zip_path(clave)
+
+    if not os.path.exists(zip_path):
+        try:
+            zip_path = _generar_y_guardar(db, proyecto_id, clave)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Error generando paquete: {exc}")
+
+    return FileResponse(
+        path=zip_path,
+        media_type="application/zip",
+        filename=f"{clave}.zip",
+    )
+
+
+@router.get("/{proyecto_id}/estado-generacion")
+def estado_generacion(
+    proyecto_id: int,
+    db: Session = Depends(get_db),
+    _current_user=Depends(get_current_user),
+):
+    """
+    Consulta el estado de generación del paquete QField.
+    Útil para hacer polling después de confirmar-asignacion.
+    Estados: sin_generar | pendiente | procesando | terminado | error
+    """
+    estado = asignacion_proyecto_repo.get_estado_generacion(db, proyecto_id)
+    if not estado:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+
+    from services.qgis_export_service import _progreso, recursos_offline_existen
+    estado["progreso"] = _progreso.get(
+        proyecto_id,
+        100 if estado["estado_generacion"] == "terminado" else 0,
+    )
+
+    # Verificación física: el estado en BD puede decir "terminado" pero los
+    # archivos pueden haber sido borrados manualmente o perdidos en un rebuild.
+    # Para considerar el proyecto offline "disponible" se exigen AMBOS:
+    # la carpeta desempaquetada y el zip de descarga.
+    recursos = recursos_offline_existen(db, proyecto_id, estado["clave"])
+    estado["archivo_existe"] = recursos["carpeta"] and recursos["zip"]
+    estado["recursos"]       = {
+        "carpeta": recursos["carpeta"],
+        "zip":     recursos["zip"],
+        "cloud":   recursos["cloud"],
+    }
+
+    return estado
+
+
+@router.post("/{proyecto_id}/proyecto-offline/generar", status_code=202)
+def generar_proyecto_offline(
+    proyecto_id: int,
+    background_tasks: BackgroundTasks,
+    reemplazar: bool = False,
+    db: Session = Depends(get_db),
+    _user=Depends(require_roles("administrador", "supervisor")),
+):
+    """
+    Dispara la generación del proyecto offline en background.
+      202 → tarea encolada
+      404 → proyecto no encontrado
+      409 → ya existe (carpeta/zip/cloud) y reemplazar=False
+    """
+    proyecto = asignacion_proyecto_repo.get_by_id(db, proyecto_id)
+    if not proyecto:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+
+    clave = proyecto["clave_proyecto"]
+    info  = recursos_offline_existen(db, proyecto_id, clave)
+
+    if info["existe"] and not reemplazar:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "mensaje": "El proyecto offline ya existe",
+                "carpeta": info["carpeta"],
+                "zip":     info["zip"],
+                "cloud":   info["cloud"],
+            },
+        )
+
+    predios = asignacion_proyecto_repo.get_predios_ids(db, proyecto_id)
+    asignacion_proyecto_repo.actualizar_estado_generacion(db, proyecto_id, "pendiente")
+    background_tasks.add_task(tarea_generar_proyecto, proyecto_id, clave, predios)
+
+    return {"mensaje": "Generación encolada", "estado_generacion": "pendiente"}
+
+
+@router.get("/{proyecto_id}/descargar-proyecto-qgis")
+def descargar_proyecto_qgis(
+    proyecto_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    """
+    Descarga un .qgz copia del proyecto base con el canvas centrado en el
+    área del proyecto. Mantiene las conexiones PostGIS vivas (no offline).
+    """
+    from fastapi.responses import FileResponse
+    import shutil
+    from services.qgis_export_service import generar_qgz_centrado
+
+    try:
+        zip_path, clave, temp_root = generar_qgz_centrado(db, proyecto_id)
+    except ValueError as e:
+        msg = str(e)
+        if msg == "Proyecto no encontrado":
+            raise HTTPException(404, msg)
+        raise HTTPException(400, msg)
+    except Exception as e:
+        raise HTTPException(500, f"Error generando QGZ: {e}")
+
+    background_tasks.add_task(shutil.rmtree, temp_root, ignore_errors=True)
+    return FileResponse(
+        zip_path,
+        filename=f"{clave}.zip",
+        media_type="application/zip",
+    )
+
+
+@router.post("/{proyecto_id}/cargar-offline")
+async def cargar_offline(
+    proyecto_id: int,
+    archivo: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _user=Depends(require_roles("administrador", "supervisor")),
+):
+    """
+    Sube un .zip con un proyecto offline ya preparado (ej. generado en QGIS
+    desktop con QFieldSync) y lo instala como el proyecto offline del proyecto
+    de asignación. Reemplaza cualquier proyecto offline previo.
+    """
+    from services.qgis_export_service import cargar_proyecto_offline
+
+    if not archivo.filename or not archivo.filename.lower().endswith(".zip"):
+        raise HTTPException(400, "El archivo debe tener extensión .zip")
+
+    contenido = await archivo.read()
+    if not contenido:
+        raise HTTPException(400, "El archivo está vacío")
+
+    try:
+        return cargar_proyecto_offline(db, proyecto_id, contenido)
+    except ValueError as e:
+        msg = str(e)
+        if msg == "Proyecto no encontrado":
+            raise HTTPException(404, msg)
+        raise HTTPException(400, msg)
+    except Exception as e:
+        raise HTTPException(500, str(e))
