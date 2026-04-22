@@ -11,6 +11,7 @@ import VectorLayer  from 'ol/layer/Vector'
 import VectorSource from 'ol/source/Vector'
 import OSM         from 'ol/source/OSM'
 import Draw        from 'ol/interaction/Draw'
+import { defaults as defaultInteractions } from 'ol/interaction'
 import GeoJSON     from 'ol/format/GeoJSON'
 import { Style, Fill, Stroke } from 'ol/style'
 import { fromLonLat } from 'ol/proj'
@@ -47,11 +48,51 @@ export default function ModalMapaAsignacion({
   const [loadingAsignar,  setLoadingAsignar]  = useState(false)
   const [error,           setError]           = useState('')
   const [geojsonDibujado, setGeojsonDibujado] = useState(null)
+  const [drawActivo,      setDrawActivo]      = useState(false)
 
   // Manzana
   const [opciones,            setOpciones]            = useState([])
   const [manzanaSeleccionada, setManzanaSeleccionada] = useState(null)
   const [buscando,            setBuscando]            = useState(false)
+
+  // ── Crear una instancia FRESCA de Draw cada vez ──────────────────────────
+  // Reciclar la misma Draw entre sesiones dejaba estado residual de eventos
+  // que causaba que el mapa siguiera el cursor tras terminar un polígono.
+  // Ahora: cada vez que se empieza una sesión nueva se crea una Draw nueva;
+  // cuando se termina/cancela se remueve + dispose.
+  const crearNuevaDraw = () => {
+    if (!mapInstance.current || !areaLayer.current) return
+
+    const draw = new Draw({
+      source: areaLayer.current.getSource(),
+      type:   'Polygon',
+    })
+
+    draw.on('drawend', async (e) => {
+      areaLayer.current.getSource().clear()
+      areaLayer.current.getSource().addFeature(e.feature)
+
+      const gj = new GeoJSON().writeFeatureObject(e.feature, {
+        featureProjection: 'EPSG:3857',
+        dataProjection:    'EPSG:4326'
+      })
+      setGeojsonDibujado(gj.geometry)
+
+      // Remover la Draw, descartarla y liberar listeners
+      setTimeout(() => {
+        mapInstance.current?.removeInteraction(draw)
+        draw.dispose()
+        if (drawInteraction.current === draw) drawInteraction.current = null
+        setDrawActivo(false)
+      }, 0)
+
+      await buscarPorPoligono(gj.geometry)
+    })
+
+    mapInstance.current.addInteraction(draw)
+    drawInteraction.current = draw
+    setDrawActivo(true)
+  }
 
   // ── Inicializar mapa ─────────────────────────────────────────────────────
   // KEY FIX: El Dialog de MUI tiene una animación de entrada. Aunque `open`
@@ -81,38 +122,31 @@ export default function ModalMapaAsignacion({
         areaLayer.current,
         prediosLayer.current
       ],
+      // Desactivamos DoubleClickZoom para que el doble-click que cierra el
+      // polígono no haga zoom al mismo tiempo.
+      interactions: defaultInteractions({ doubleClickZoom: false }),
       view: new View({
         center: fromLonLat([-73.8176, 5.6044]),
         zoom:   14
       })
     })
 
-    // Forzar recálculo de tamaño por si acaso
     mapInstance.current.updateSize()
 
-    // Interacción de dibujo solo para polígono
     if (metodo === 'poligono') {
-      const draw = new Draw({
-        source: areaLayer.current.getSource(),
-        type:   'Polygon'
-      })
-
-      draw.on('drawend', async (e) => {
-        areaLayer.current.getSource().clear()
-        areaLayer.current.getSource().addFeature(e.feature)
-
-        const gj = new GeoJSON().writeFeatureObject(e.feature, {
-          featureProjection: 'EPSG:3857',
-          dataProjection:    'EPSG:4326'
-        })
-        setGeojsonDibujado(gj.geometry)
-        await buscarPorPoligono(gj.geometry)
-      })
-
-      drawInteraction.current = draw
-      mapInstance.current.addInteraction(draw)
+      crearNuevaDraw()
     }
   }, [metodo]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reactivar el dibujo: crear una Draw fresca
+  const reactivarDibujo = () => {
+    if (!mapInstance.current) return
+    areaLayer.current?.getSource().clear()
+    prediosLayer.current?.getSource().clear()
+    setPredios([])
+    setGeojsonDibujado(null)
+    crearNuevaDraw()
+  }
 
   // Destruir mapa al cerrar
   useEffect(() => {
@@ -262,6 +296,7 @@ export default function ModalMapaAsignacion({
     setManzanaSeleccionada(null)
     setOpciones([])
     setError('')
+    setDrawActivo(false)
     onClose()
   }
 
@@ -364,9 +399,30 @@ export default function ModalMapaAsignacion({
 
             {/* Método polígono */}
             {metodo === 'poligono' && (
-              <Alert severity="info">
-                Haz clic en el mapa para dibujar el polígono. Doble clic para terminar.
-              </Alert>
+              <>
+                <Alert severity="info">
+                  Haz clic para agregar puntos y luego pulsá <strong>Terminar polígono</strong>
+                  (o <strong>doble clic</strong> en el último punto). Clic derecho cancela.
+                </Alert>
+                {drawActivo && (
+                  <Button
+                    variant="contained"
+                    color="success"
+                    onClick={() => drawInteraction.current?.finishDrawing()}
+                  >
+                    Terminar polígono
+                  </Button>
+                )}
+                {!drawActivo && (
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    onClick={reactivarDibujo}
+                  >
+                    Dibujar nuevo polígono
+                  </Button>
+                )}
+              </>
             )}
 
             {/* Loading */}
@@ -435,7 +491,28 @@ export default function ModalMapaAsignacion({
 
           {/* Mapa */}
           <Box sx={{ flexGrow: 1 }}>
-            <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+            <div
+              ref={mapRef}
+              style={{ width: '100%', height: '100%' }}
+              onContextMenu={(e) => {
+                // Click derecho: cancela el dibujo actual, descarta la
+                // instancia completa (remove + dispose) y limpia estado.
+                // Para dibujar de nuevo pulsar "Dibujar nuevo polígono".
+                if (drawInteraction.current && drawActivo) {
+                  e.preventDefault()
+                  const draw = drawInteraction.current
+                  draw.abortDrawing()
+                  mapInstance.current?.removeInteraction(draw)
+                  draw.dispose()
+                  drawInteraction.current = null
+                  setDrawActivo(false)
+                  areaLayer.current?.getSource().clear()
+                  prediosLayer.current?.getSource().clear()
+                  setPredios([])
+                  setGeojsonDibujado(null)
+                }
+              }}
+            />
           </Box>
         </Box>
       </DialogContent>

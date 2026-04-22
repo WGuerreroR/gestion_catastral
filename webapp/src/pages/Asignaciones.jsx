@@ -263,9 +263,11 @@ export default function Asignaciones() {
   // ── Columnas DataGrid ───────────────────────────────────
   const columnas = [
     {
-      field:      'clave_proyecto',
-      headerName: 'Clave',
-      width:      160,
+      field:       'clave_proyecto',
+      headerName:  'Clave',
+      width:       160,
+      align:       'center',
+      headerAlign: 'center',
       renderCell: ({ value }) => (
         <Typography variant="body2" fontWeight={600}>{value}</Typography>
       )
@@ -301,13 +303,15 @@ export default function Asignaciones() {
       )
     },
     {
-      field:      'acciones',
-      headerName: 'Acciones',
-      width:      260,
-      sortable:   false,
+      field:       'acciones',
+      headerName:  'Acciones',
+      width:       260,
+      sortable:    false,
+      align:       'center',
+      headerAlign: 'center',
       renderCell: ({ row }) => (
-        <Stack direction="row" spacing={0.5} alignItems="center">
-          
+        <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="center" width="100%">
+
           {puedeAdmin && (
             <>
               <Tooltip title="Asignar predios">
@@ -482,7 +486,12 @@ export default function Asignaciones() {
           '& .MuiDataGrid-row.Mui-selected': {
             bgcolor: 'secundary.main',
             '&:hover': { bgcolor: 'secundary.main' }
-          }
+          },
+          // Centrar verticalmente el contenido de todas las celdas
+          '& .MuiDataGrid-cell': {
+            display: 'flex',
+            alignItems: 'center',
+          },
         }}
       />
 
