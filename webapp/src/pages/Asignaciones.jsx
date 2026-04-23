@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Box, Button, Typography, Chip, IconButton,
   Dialog, DialogTitle, DialogContent, DialogActions,
@@ -52,6 +52,7 @@ export default function Asignaciones() {
   const [descargando,    setDescargando]    = useState(false)
   const [descargandoQGZ, setDescargandoQGZ] = useState(false)
   const [estadoOffline,  setEstadoOffline]  = useState(null)
+  const pollingRef = useRef(null)
 
   // Modal crear/editar
   const [modalOpen,  setModalOpen]  = useState(false)
@@ -96,15 +97,51 @@ export default function Asignaciones() {
   const mostrarError   = (msg) => { setError(msg);   setTimeout(() => setError(''),   4000) }
   const mostrarSuccess = (msg) => { setSuccess(msg); setTimeout(() => setSuccess(''), 4000) }
 
-  // ── Estado offline del proyecto seleccionado (para condicionar botón) ──
+  // ── Estado offline del proyecto seleccionado + polling ─────────────────
+  const detenerPolling = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current)
+      pollingRef.current = null
+    }
+  }
+
   const cargarEstadoOffline = async (proyectoId) => {
     try {
       const { data } = await api.get(`/proyectos/${proyectoId}/estado-generacion`)
       setEstadoOffline(data)
+      // Si está generando, arrancá el polling (si no está ya)
+      if (['pendiente', 'procesando'].includes(data?.estado_generacion)) {
+        iniciarPolling(proyectoId)
+      } else {
+        detenerPolling()
+      }
+      return data
     } catch {
       setEstadoOffline(null)
+      return null
     }
   }
+
+  const iniciarPolling = (proyectoId) => {
+    if (pollingRef.current) return  // ya hay uno activo
+    pollingRef.current = setInterval(async () => {
+      try {
+        const { data } = await api.get(`/proyectos/${proyectoId}/estado-generacion`)
+        setEstadoOffline(data)
+        const e = data?.estado_generacion
+        if (!e || !['pendiente', 'procesando'].includes(e)) {
+          detenerPolling()
+          if (e === 'terminado') mostrarSuccess('Proyecto offline listo')
+          if (e === 'error')     mostrarError('Error generando proyecto offline')
+        }
+      } catch {
+        // silencioso, el próximo tick volverá a intentar
+      }
+    }, 3000)
+  }
+
+  // Detener polling al desmontar
+  useEffect(() => () => detenerPolling(), [])
 
   // ── Descargar proyecto offline (.zip) ───────────────────
   const handleDescargar = async (proyecto) => {
@@ -252,11 +289,27 @@ export default function Asignaciones() {
     setModalMapa(true)
   }
 
-  const handleAsignacionExitosa = (total) => {
+  const handleAsignacionExitosa = async (total) => {
     mostrarSuccess(`${total} predios asignados exitosamente`)
     cargarDatos()
     if (seleccionado?.id === proyectoActivo?.id) {
       setSeleccionado({ ...seleccionado, total_predios: (seleccionado.total_predios || 0) + total })
+    }
+    // Dispara regeneración offline en background (fire-and-forget)
+    // El progreso detallado se ve en la página de detalle.
+    if (proyectoActivo?.id) {
+      try {
+        await api.post(
+          `/proyectos/${proyectoActivo.id}/proyecto-offline/generar`,
+          null,
+          { params: { reemplazar: true } }
+        )
+        if (seleccionado?.id === proyectoActivo?.id) {
+          cargarEstadoOffline(proyectoActivo.id)
+        }
+      } catch (e) {
+        console.warn('[offline] regeneración tras asignación falló:', e?.message)
+      }
     }
   }
 
@@ -388,7 +441,20 @@ export default function Asignaciones() {
                   color={coloresEstado[seleccionado.estado] || 'default'}
                 />
               </Box>
-              <Stack direction="row" spacing={1}>
+              <Stack direction="row" spacing={1} alignItems="center">
+                {/* Chip "Generando offline" mientras el proyecto se está generando */}
+                {['pendiente', 'procesando'].includes(estadoOffline?.estado_generacion) && (
+                  <Chip
+                    size="small"
+                    color="info"
+                    icon={<CircularProgress size={14} sx={{ color: 'inherit' }} />}
+                    label={`Generando offline… ${estadoOffline?.progreso ?? 0}%`}
+                  />
+                )}
+                {estadoOffline?.estado_generacion === 'error' && (
+                  <Chip size="small" color="error" label="Error generando offline" />
+                )}
+
                 {estadoOffline?.estado_generacion === 'terminado' && estadoOffline?.archivo_existe && (
                   <Button
                     variant="outlined"
@@ -476,6 +542,7 @@ export default function Asignaciones() {
         initialState={{ pagination: { paginationModel: { pageSize: 10 } } }}
         onRowClick={({ row }) => {
           setSeleccionado(row)
+          detenerPolling()
           cargarEstadoOffline(row.id)
         }}
         disableRowSelectionOnClick={false}

@@ -713,11 +713,15 @@ export default function AsignacionDetalle() {
         open={modalMapa}
         onClose={() => setModalMapa(false)}
         metodo={metodoSelected}
-        proyecto={proyecto}
+        // Inyectamos total_predios desde la lista de predios cargada, porque
+        // /proyectos/{id} (get_by_id) no lo devuelve.
+        proyecto={proyecto ? { ...proyecto, total_predios: predios.length } : null}
         onAsignar={(total) => {
           mostrarSuccess(`${total} predios asignados — generando proyecto offline...`)
           cargarDatos()
-          generarProyectoOffline(false)
+          // Forzamos reemplazo sin preguntar: al actualizar una asignación el
+          // offline previo queda obsoleto y SIEMPRE debe regenerarse.
+          generarProyectoOffline(true)
         }}
       />
 

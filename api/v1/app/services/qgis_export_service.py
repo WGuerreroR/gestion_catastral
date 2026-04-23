@@ -229,7 +229,7 @@ def generar_paquete_proyecto(
     4. Actualiza el extent del canvas en el .qgz
     5. Empaqueta capas PostGIS → offline.gpkg (QgsOfflineEditing)
     """
-    print("--- 0 generar_paquete_proyecto ")
+
     from sqlalchemy import text
     from repositories import asignacion_proyecto_repo
 
@@ -243,28 +243,27 @@ def generar_paquete_proyecto(
         raise ValueError("El proyecto no tiene área geométrica definida")
 
     wkt_9377 = row.wkt
-    print("--- 1 generar_paquete_proyecto ")
+
     if predios_ids is None:
         predios_ids = asignacion_proyecto_repo.get_predios_ids(db, proyecto_id)
-    print("--- 2 generar_paquete_proyecto ")
+   
     qgis_svc = QgisProjectService(
         clave_proyecto=clave_proyecto,
         output_base_dir=QGIS_EXPORTS_DIR,
     )
-    print("--- 3 generar_paquete_proyecto ")
+
     qgis_svc.copiar_proyecto_base()
-    print("--- 3.1 generar_paquete_proyecto ")
+
     shp_path = qgis_svc.get_shp_path()
     shp_svc  = ShapefileService(shp_path)
     shp_svc.reemplazar_geometria(
         wkt_9377=wkt_9377,
         atributos={"nombre": clave_proyecto, "id": proyecto_id}
     )
-    print("--- 3.2 generar_paquete_proyecto ")
-    print("--- 4 generar_paquete_proyecto ")
+
     xmin, ymin, xmax, ymax = shp_svc.get_extent(wkt_9377)
     qgis_svc.actualizar_extent(xmin, ymin, xmax, ymax)
-    print("--- 5 generar_paquete_proyecto ")
+
     qgis_svc.empaquetar_offline_qfieldsync(
         predios_ids,
         extent=(xmin, ymin, xmax, ymax),

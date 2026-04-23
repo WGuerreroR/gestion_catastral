@@ -34,6 +34,8 @@ class ConfirmarAsignacion(BaseModel):
     tipo_asignacion: str = "espacial"
     geojson:         Optional[dict] = None  # viene de polígono o shapefile
     codigo_manzana:  Optional[str]  = None  # viene de búsqueda por manzana
+    modo:            str = "reemplazar"     # reemplazar | agregar
+    estrategia_area: str = "union"          # union | convex_hull (solo si modo=agregar)
 
 class CambioEstadoPredio(BaseModel):
     estado: str
@@ -130,21 +132,40 @@ def confirmar_asignacion(
     if not data.id_operaciones:
         raise HTTPException(status_code=400, detail="No hay predios para asignar")
 
+    if data.modo not in ("reemplazar", "agregar"):
+        raise HTTPException(status_code=400, detail="modo inválido (reemplazar | agregar)")
+    if data.estrategia_area not in ("union", "convex_hull"):
+        raise HTTPException(status_code=400, detail="estrategia_area inválida (union | convex_hull)")
+
     proyecto = asignacion_proyecto_repo.get_by_id(db, data.proyecto_id)
     if not proyecto:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
-    # Guardar área según el método usado
-    if data.geojson:
-        asignacion_proyecto_repo.guardar_area_poligono(
-            db, data.proyecto_id, json.dumps(data.geojson)
-        )
-    elif data.codigo_manzana:
-        asignacion_proyecto_repo.guardar_area_manzana(
-            db, data.proyecto_id, data.codigo_manzana
-        )
+    # Modo reemplazar: borrar predios previos antes de insertar los nuevos
+    if data.modo == "reemplazar":
+        asignacion_proyecto_repo.borrar_predios_proyecto(db, data.proyecto_id)
 
-    # Insertar predios
+    # Guardar / agregar área según modo y estrategia
+    if data.geojson:
+        if data.modo == "reemplazar":
+            asignacion_proyecto_repo.guardar_area_poligono(
+                db, data.proyecto_id, json.dumps(data.geojson)
+            )
+        else:
+            asignacion_proyecto_repo.agregar_area_poligono(
+                db, data.proyecto_id, json.dumps(data.geojson), data.estrategia_area
+            )
+    elif data.codigo_manzana:
+        if data.modo == "reemplazar":
+            asignacion_proyecto_repo.guardar_area_manzana(
+                db, data.proyecto_id, data.codigo_manzana
+            )
+        else:
+            asignacion_proyecto_repo.agregar_area_manzana(
+                db, data.proyecto_id, data.codigo_manzana, data.estrategia_area
+            )
+
+    # Insertar predios (asignar_predios ya maneja duplicados)
     insertados = asignacion_proyecto_repo.asignar_predios(
         db,
         proyecto_id=data.proyecto_id,

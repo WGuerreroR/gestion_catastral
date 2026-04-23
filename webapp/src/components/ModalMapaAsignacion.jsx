@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import {
-  Dialog, DialogTitle, DialogContent, DialogActions,
+  Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
   Button, Box, Typography, Alert, CircularProgress,
-  Stack, TextField, Autocomplete, Divider
+  Stack, TextField, Autocomplete, Divider,
+  Radio, RadioGroup, FormControlLabel
 } from '@mui/material'
 import Map          from 'ol/Map'
 import View         from 'ol/View'
@@ -34,14 +35,21 @@ const estiloPredio = new Style({
   stroke: new Stroke({ color: '#2E7D32', width: 1.5 })
 })
 
+// Área ya asignada al proyecto — se muestra como referencia visual.
+const estiloAreaExistente = new Style({
+  fill:   new Fill({ color: 'rgba(156, 39, 176, 0.1)' }),
+  stroke: new Stroke({ color: '#7B1FA2', width: 2.5, lineDash: [10, 5] })
+})
+
 export default function ModalMapaAsignacion({
   open, onClose, metodo, proyecto, onAsignar
 }) {
-  const mapRef          = useRef(null)
-  const mapInstance     = useRef(null)
-  const areaLayer       = useRef(null)
-  const prediosLayer    = useRef(null)
-  const drawInteraction = useRef(null)
+  const mapRef             = useRef(null)
+  const mapInstance        = useRef(null)
+  const areaLayer          = useRef(null)
+  const prediosLayer       = useRef(null)
+  const areaExistenteLayer = useRef(null)
+  const drawInteraction    = useRef(null)
 
   const [predios,         setPredios]         = useState([])
   const [loadingPreview,  setLoadingPreview]  = useState(false)
@@ -54,6 +62,10 @@ export default function ModalMapaAsignacion({
   const [opciones,            setOpciones]            = useState([])
   const [manzanaSeleccionada, setManzanaSeleccionada] = useState(null)
   const [buscando,            setBuscando]            = useState(false)
+
+  // Modo de asignación (solo aparece si el proyecto ya tiene predios)
+  const [modalModo, setModalModo] = useState({ open: false, opcion: 'reemplazar' })
+  // opciones: 'reemplazar' | 'agregar_union' | 'agregar_convex_hull'
 
   // ── Crear una instancia FRESCA de Draw cada vez ──────────────────────────
   // Reciclar la misma Draw entre sesiones dejaba estado residual de eventos
@@ -102,8 +114,16 @@ export default function ModalMapaAsignacion({
   const initMap = useCallback(() => {
     if (!mapRef.current || mapInstance.current) return
 
-    const areaSource    = new VectorSource()
-    const prediosSource = new VectorSource()
+    const areaSource          = new VectorSource()
+    const prediosSource       = new VectorSource()
+    const areaExistenteSource = new VectorSource()
+
+    // Área ya asignada al proyecto — capa de referencia (fondo)
+    areaExistenteLayer.current = new VectorLayer({
+      source: areaExistenteSource,
+      style:  estiloAreaExistente,
+      zIndex: 0,
+    })
 
     areaLayer.current = new VectorLayer({
       source: areaSource,
@@ -119,6 +139,7 @@ export default function ModalMapaAsignacion({
       target: mapRef.current,
       layers: [
         new TileLayer({ source: new OSM() }),
+        areaExistenteLayer.current,   // referencia (fondo)
         areaLayer.current,
         prediosLayer.current
       ],
@@ -136,7 +157,35 @@ export default function ModalMapaAsignacion({
     if (metodo === 'poligono') {
       crearNuevaDraw()
     }
+
+    // Cargar el área existente del proyecto como referencia visual
+    cargarAreaExistente()
   }, [metodo]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Carga el polígono del área actual del proyecto para mostrarlo en el mapa
+  // como referencia (no se puede editar ni borrar desde este modal).
+  const cargarAreaExistente = async () => {
+    if (!proyecto?.id || !areaExistenteLayer.current || !mapInstance.current) return
+    try {
+      const { data } = await api.get(`/proyectos/${proyecto.id}/area`)
+      if (!data) return
+      const source = areaExistenteLayer.current.getSource()
+      source.clear()
+      const features = new GeoJSON().readFeatures(data, {
+        featureProjection: 'EPSG:3857',
+        dataProjection:    'EPSG:4326'
+      })
+      source.addFeatures(features)
+      if (source.getFeatures().length > 0) {
+        mapInstance.current.getView().fit(source.getExtent(), {
+          padding: [60, 60, 60, 60],
+          maxZoom: 17,
+        })
+      }
+    } catch {
+      // El proyecto no tiene área previa — no es crítico.
+    }
+  }
 
   // Reactivar el dibujo: crear una Draw fresca
   const reactivarDibujo = () => {
@@ -267,8 +316,20 @@ export default function ModalMapaAsignacion({
     }
   }
 
-  const handleAsignar = async () => {
+  // Click inicial del botón "Asignar N predios".
+  // Si el proyecto ya tiene predios asignados → mostrar diálogo de modo.
+  // Si no → envío directo con modo=reemplazar (primera vez).
+  const handleClickAsignar = () => {
     if (predios.length === 0) return
+    if ((proyecto?.total_predios || 0) > 0) {
+      setModalModo({ open: true, opcion: 'reemplazar' })
+    } else {
+      enviarAsignacion('reemplazar', 'union')
+    }
+  }
+
+  // Construye el body y envía al backend
+  const enviarAsignacion = async (modo, estrategia) => {
     setLoadingAsignar(true)
     setError('')
     try {
@@ -278,7 +339,9 @@ export default function ModalMapaAsignacion({
         id_operaciones:  predios.map(p => p.id_operacion),
         tipo_asignacion: metodo === 'manzana' ? 'alfanumerica' : 'espacial',
         geojson:         geojsonDibujado || null,
-        codigo_manzana:  manzanaSeleccionada?.codigo || null
+        codigo_manzana:  manzanaSeleccionada?.codigo || null,
+        modo,
+        estrategia_area: estrategia,
       }
       const { data } = await api.post('/proyectos/confirmar-asignacion', body)
       onAsignar(data.insertados)
@@ -288,6 +351,15 @@ export default function ModalMapaAsignacion({
     } finally {
       setLoadingAsignar(false)
     }
+  }
+
+  // Mapea opción UI → (modo, estrategia) backend
+  const handleConfirmarModo = () => {
+    const op = modalModo.opcion
+    setModalModo({ open: false, opcion: 'reemplazar' })
+    if      (op === 'reemplazar')          enviarAsignacion('reemplazar', 'union')
+    else if (op === 'agregar_union')       enviarAsignacion('agregar',    'union')
+    else if (op === 'agregar_convex_hull') enviarAsignacion('agregar',    'convex_hull')
   }
 
   const handleCerrar = () => {
@@ -307,9 +379,10 @@ export default function ModalMapaAsignacion({
   }
 
   return (
-    // TransitionProps.onEntered se dispara cuando el dialog terminó su
-    // animación de apertura y el contenido tiene dimensiones reales.
-    // Es el momento seguro para inicializar OpenLayers.
+    <>
+    {/* TransitionProps.onEntered se dispara cuando el dialog terminó su
+        animación de apertura y el contenido tiene dimensiones reales.
+        Es el momento seguro para inicializar OpenLayers. */}
     <Dialog
       open={open}
       onClose={handleCerrar}
@@ -422,6 +495,18 @@ export default function ModalMapaAsignacion({
                     Dibujar nuevo polígono
                   </Button>
                 )}
+                {proyecto?.total_predios > 0 && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                    <Box sx={{
+                      width: 16, height: 16, borderRadius: 0.5,
+                      bgcolor: 'rgba(156, 39, 176, 0.1)',
+                      border: '2.5px dashed #7B1FA2'
+                    }} />
+                    <Typography variant="caption" color="text.secondary">
+                      Área actual del proyecto (referencia)
+                    </Typography>
+                  </Box>
+                )}
               </>
             )}
 
@@ -523,7 +608,7 @@ export default function ModalMapaAsignacion({
         </Button>
         <Button
           variant="contained"
-          onClick={handleAsignar}
+          onClick={handleClickAsignar}
           disabled={predios.length === 0 || loadingAsignar}
         >
           {loadingAsignar
@@ -533,5 +618,60 @@ export default function ModalMapaAsignacion({
         </Button>
       </DialogActions>
     </Dialog>
+
+    {/* ── Modal: modo de asignación (reemplazar / agregar) ─────────────── */}
+    <Dialog
+      open={modalModo.open}
+      onClose={() => setModalModo({ open: false, opcion: 'reemplazar' })}
+      maxWidth="sm" fullWidth
+    >
+      <DialogTitle>Modo de asignación</DialogTitle>
+      <DialogContent>
+        <DialogContentText sx={{ mb: 2 }}>
+          El proyecto <strong>{proyecto?.clave_proyecto}</strong> ya tiene{' '}
+          <strong>{proyecto?.total_predios}</strong> predios asignados. ¿Cómo querés proceder?
+        </DialogContentText>
+
+        <RadioGroup
+          value={modalModo.opcion}
+          onChange={(e) => setModalModo({ ...modalModo, opcion: e.target.value })}
+        >
+          <FormControlLabel
+            value="reemplazar"
+            control={<Radio />}
+            label="Reemplazar todo (borrar los anteriores)"
+          />
+          <FormControlLabel
+            value="agregar_union"
+            control={<Radio />}
+            label="Agregar y unir las geometrías"
+          />
+          <FormControlLabel
+            value="agregar_convex_hull"
+            control={<Radio />}
+            label="Agregar y ampliar las geometrías"
+          />
+        </RadioGroup>
+
+        {modalModo.opcion === 'reemplazar' && (
+          <Alert severity="warning" sx={{ mt: 2 }}>
+            Se borrarán los <strong>{proyecto?.total_predios}</strong> predios existentes antes de asignar los nuevos.
+          </Alert>
+        )}
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2 }}>
+        <Button onClick={() => setModalModo({ open: false, opcion: 'reemplazar' })}>
+          Cancelar
+        </Button>
+        <Button
+          variant="contained"
+          color={modalModo.opcion === 'reemplazar' ? 'warning' : 'primary'}
+          onClick={handleConfirmarModo}
+        >
+          Continuar
+        </Button>
+      </DialogActions>
+    </Dialog>
+    </>
   )
 }

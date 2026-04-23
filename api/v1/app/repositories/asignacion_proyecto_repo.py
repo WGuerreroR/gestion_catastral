@@ -88,53 +88,102 @@ def delete(db: Session, proyecto_id: int):
     db.commit()
 
 def guardar_area_poligono(db: Session, proyecto_id: int, geojson: str):
-    """Acumula el polígono al MultiPolygon existente del proyecto"""
+    """Reemplaza el área del proyecto con el polígono dado."""
     db.execute(text("""
         UPDATE admin_asignacion SET
-            area_geom = CASE
-                WHEN area_geom IS NOT NULL THEN
-                    ST_Multi(ST_Union(
-                        area_geom,
-                        ST_Multi(ST_Transform(
-                            ST_SetSRID(ST_GeomFromGeoJSON(:geojson), 4326),
-                            9377
-                        ))
-                    ))
-                ELSE
-                    ST_Multi(ST_Transform(
-                        ST_SetSRID(ST_GeomFromGeoJSON(:geojson), 4326),
-                        9377
-                    ))
-            END,
+            area_geom = ST_Multi(ST_Transform(
+                ST_SetSRID(ST_GeomFromGeoJSON(:geojson), 4326),
+                9377
+            )),
+            codigo_manzana      = NULL,
             fecha_actualizacion = NOW()
         WHERE id = :id
     """), {"geojson": geojson, "id": proyecto_id})
     db.commit()
 
 def guardar_area_manzana(db: Session, proyecto_id: int, codigo_manzana: str):
-    """Guarda el buffer 0.5m de la manzana como área del proyecto"""
+    """Reemplaza el área del proyecto con el buffer 0.5m de la manzana."""
     db.execute(text("""
         UPDATE admin_asignacion SET
-            area_geom = CASE
-                WHEN area_geom IS NOT NULL THEN
-                    ST_Multi(ST_Union(
-                        area_geom,
-                        ST_Multi((
-                            SELECT ST_Buffer(geom, 0.5)
-                            FROM manzana WHERE codigo = :codigo
-                        ))
-                    ))
-                ELSE
-                    ST_Multi((
-                        SELECT ST_Buffer(geom, 0.5)
-                        FROM manzana WHERE codigo = :codigo
-                    ))
-            END,
+            area_geom = ST_Multi((
+                SELECT ST_Buffer(geom, 0.5)
+                FROM manzana WHERE codigo = :codigo
+            )),
             codigo_manzana      = :codigo,
             fecha_actualizacion = NOW()
         WHERE id = :id
     """), {"codigo": codigo_manzana, "id": proyecto_id})
     db.commit()
+
+def agregar_area_poligono(db: Session, proyecto_id: int, geojson: str, estrategia: str):
+    """
+    Agrega un polígono al área existente del proyecto.
+      - 'union'       → ST_Multi(ST_Union(vieja, nueva))
+      - 'convex_hull' → ST_Multi(ST_ConvexHull(ST_Union(vieja, nueva)))
+    Setea codigo_manzana = NULL (el área compuesta ya no representa una sola manzana).
+    """
+    if estrategia not in ("union", "convex_hull"):
+        raise ValueError(f"estrategia_area inválida: {estrategia}")
+
+    nueva_expr = """ST_Multi(ST_Transform(
+        ST_SetSRID(ST_GeomFromGeoJSON(:geojson), 4326),
+        9377
+    ))"""
+
+    if estrategia == "union":
+        combinada_expr = f"ST_Multi(ST_Union(area_geom, {nueva_expr}))"
+    else:  # convex_hull
+        combinada_expr = f"ST_Multi(ST_ConvexHull(ST_Union(area_geom, {nueva_expr})))"
+
+    db.execute(text(f"""
+        UPDATE admin_asignacion SET
+            area_geom = CASE
+                WHEN area_geom IS NOT NULL THEN {combinada_expr}
+                ELSE {nueva_expr}
+            END,
+            codigo_manzana      = NULL,
+            fecha_actualizacion = NOW()
+        WHERE id = :id
+    """), {"geojson": geojson, "id": proyecto_id})
+    db.commit()
+
+
+def agregar_area_manzana(db: Session, proyecto_id: int, codigo_manzana: str, estrategia: str):
+    """Agrega el buffer 0.5m de la manzana al área existente, según estrategia."""
+    if estrategia not in ("union", "convex_hull"):
+        raise ValueError(f"estrategia_area inválida: {estrategia}")
+
+    nueva_expr = """ST_Multi((
+        SELECT ST_Buffer(geom, 0.5)
+        FROM manzana WHERE codigo = :codigo
+    ))"""
+
+    if estrategia == "union":
+        combinada_expr = f"ST_Multi(ST_Union(area_geom, {nueva_expr}))"
+    else:  # convex_hull
+        combinada_expr = f"ST_Multi(ST_ConvexHull(ST_Union(area_geom, {nueva_expr})))"
+
+    db.execute(text(f"""
+        UPDATE admin_asignacion SET
+            area_geom = CASE
+                WHEN area_geom IS NOT NULL THEN {combinada_expr}
+                ELSE {nueva_expr}
+            END,
+            codigo_manzana      = NULL,
+            fecha_actualizacion = NOW()
+        WHERE id = :id
+    """), {"codigo": codigo_manzana, "id": proyecto_id})
+    db.commit()
+
+
+def borrar_predios_proyecto(db: Session, proyecto_id: int):
+    """Borra todas las asignaciones de predios del proyecto."""
+    db.execute(
+        text("DELETE FROM admin_persona_predio WHERE proyecto_id = :id"),
+        {"id": proyecto_id}
+    )
+    db.commit()
+
 
 def limpiar_area(db: Session, proyecto_id: int):
     db.execute(text("""
