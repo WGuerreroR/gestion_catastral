@@ -3,7 +3,8 @@ import {
   Box, Typography, Chip, Button, Alert,
   CircularProgress, Stack, Divider, Grid,
   Card, CardContent, IconButton, Tab, Tabs,
-  Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions
+  Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
+  Tooltip
 } from '@mui/material'
 import { DataGrid } from '@mui/x-data-grid'
 import ArrowBackIcon  from '@mui/icons-material/ArrowBack'
@@ -13,9 +14,11 @@ import AssignmentIcon from '@mui/icons-material/Assignment'
 import PersonIcon     from '@mui/icons-material/Person'
 import FolderIcon     from '@mui/icons-material/Folder'
 import DownloadIcon   from '@mui/icons-material/Download'
-import BuildIcon      from '@mui/icons-material/Build'
-import UploadIcon     from '@mui/icons-material/Upload'
-import WarningIcon    from '@mui/icons-material/Warning'
+import BuildIcon       from '@mui/icons-material/Build'
+import UploadIcon      from '@mui/icons-material/Upload'
+import WarningIcon     from '@mui/icons-material/Warning'
+import CloudUploadIcon from '@mui/icons-material/CloudUpload'
+import SyncIcon        from '@mui/icons-material/Sync'
 import Map          from 'ol/Map'
 import View         from 'ol/View'
 import TileLayer    from 'ol/layer/Tile'
@@ -106,6 +109,11 @@ export default function AsignacionDetalle() {
   const [errorArchivoOffline, setErrorArchivoOffline] = useState('')
   const fileInputCargaRef = useRef(null)
 
+  // QField Cloud (subir / sincronizar con el proyecto remoto)
+  const [cloudStatus,     setCloudStatus]     = useState(null)
+  const [procesandoCloud, setProcesandoCloud] = useState(false)
+  const cloudPollingRef = useRef(null)
+
   const mostrarError   = (msg) => { setError(msg);   setTimeout(() => setError(''),   4000) }
   const mostrarSuccess = (msg) => { setSuccess(msg); setTimeout(() => setSuccess(''), 4000) }
 
@@ -150,11 +158,102 @@ export default function AsignacionDetalle() {
     }
   }, [id])
 
+  // ── QField Cloud: estado combinado + acciones en background ─────────────
+  const detenerPollingCloud = () => {
+    if (cloudPollingRef.current) {
+      clearInterval(cloudPollingRef.current)
+      cloudPollingRef.current = null
+    }
+  }
+
+  const cargarCloudStatus = useCallback(async () => {
+    try {
+      const { data } = await api.get(`/proyectos/${id}/qfield/cloud-status`)
+      setCloudStatus(data)
+      return data
+    } catch (err) {
+      console.warn('[cloud] cloud-status no disponible:', err?.message)
+      setCloudStatus(null)
+      return null
+    }
+  }, [id])
+
+  const iniciarPollingCloud = useCallback(() => {
+    detenerPollingCloud()
+    let failCount = 0
+    const MAX_FAILS = 3
+    cloudPollingRef.current = setInterval(async () => {
+      const data = await cargarCloudStatus()
+
+      // Sin respuesta: contamos fallos; tras 3 seguidos asumimos sesión caída
+      if (!data) {
+        failCount += 1
+        if (failCount >= MAX_FAILS) {
+          console.warn('[cloud] polling sin respuesta — sesión/conexión caída')
+          detenerPollingCloud()
+          setCloudStatus(null)
+          setProcesandoCloud(false)
+        }
+        return
+      }
+
+      failCount = 0  // reset en cada éxito
+      if (!data.operacion_en_curso) {
+        detenerPollingCloud()
+        setProcesandoCloud(false)
+        if (data.operacion_error) {
+          mostrarError(`Error en QField Cloud: ${data.operacion_error}`)
+        }
+      }
+    }, 2000)
+  }, [cargarCloudStatus]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Botón único de QField Cloud: el backend decide si subir (primera vez),
+  // sincronizar (pull del campo) o recrear (si fue borrado en cloud).
+  const handleSincronizarCloud = async () => {
+    setProcesandoCloud(true)
+    try {
+      await api.post(`/proyectos/${id}/qfield/sincronizar-cloud`)
+      mostrarSuccess('Operación encolada — progreso arriba')
+      await cargarCloudStatus()
+      iniciarPollingCloud()
+    } catch (e) {
+      mostrarError(getErrorMessage(e, 'Error con QField Cloud'))
+      setProcesandoCloud(false)
+    }
+  }
+
+  // Cancela cualquier operación en curso (offline o cloud) para este proyecto
+  const handleCancelarOperacion = async () => {
+    try {
+      await api.post(`/proyectos/${id}/cancelar-operacion`)
+      // Los pollings detectan el cambio y limpian los chips automáticamente
+    } catch (e) {
+      mostrarError(getErrorMessage(e, 'No se pudo cancelar la operación'))
+    }
+  }
+
   const iniciarPolling = useCallback(() => {
     detenerPolling()
+    let failCount = 0
+    const MAX_FAILS = 3
     pollingRef.current = setInterval(async () => {
       const data = await cargarEstadoOffline()
-      const estado = data?.estado_generacion
+
+      // Sin respuesta: contamos fallos; tras 3 seguidos asumimos sesión caída
+      if (!data) {
+        failCount += 1
+        if (failCount >= MAX_FAILS) {
+          console.warn('[offline] polling sin respuesta — sesión/conexión caída')
+          detenerPolling()
+          setEstadoOffline(null)
+          setGenerandoOffline(false)
+        }
+        return
+      }
+
+      failCount = 0  // reset en cada éxito
+      const estado = data.estado_generacion
       if (!estado || !['pendiente', 'procesando'].includes(estado)) {
         detenerPolling()
         if (estado === 'terminado') mostrarSuccess('Proyecto offline listo')
@@ -170,8 +269,17 @@ export default function AsignacionDetalle() {
         iniciarPolling()
       }
     })
-    return () => detenerPolling()
-  }, [cargarEstadoOffline, iniciarPolling])
+    cargarCloudStatus().then(data => {
+      if (data?.operacion_en_curso) {
+        setProcesandoCloud(true)
+        iniciarPollingCloud()
+      }
+    })
+    return () => {
+      detenerPolling()
+      detenerPollingCloud()
+    }
+  }, [cargarEstadoOffline, iniciarPolling, cargarCloudStatus, iniciarPollingCloud])
 
   // ── Descargar QGIS (proyecto base centrado, PostGIS vivo) ──
   const handleDescargarQGZ = async () => {
@@ -270,6 +378,7 @@ export default function AsignacionDetalle() {
       setModalCargarOffline(false)
       setArchivoOfflineSel(null)
       cargarEstadoOffline()
+      cargarCloudStatus()
     } catch (e) {
       mostrarError(getErrorMessage(e, 'Error cargando proyecto offline'))
       setModalCargarOffline(false)
@@ -488,7 +597,7 @@ export default function AsignacionDetalle() {
               color="secondary"
               startIcon={descargandoQGZ ? <CircularProgress size={16} /> : <MapIcon />}
               onClick={handleDescargarQGZ}
-              disabled={descargandoQGZ}
+              disabled={descargandoQGZ || procesandoCloud}
             >
               {descargandoQGZ ? 'Descargando...' : 'Descargar área'}
             </Button>
@@ -497,6 +606,7 @@ export default function AsignacionDetalle() {
                 variant="contained"
                 startIcon={<AssignmentIcon />}
                 onClick={() => setModalMetodo(true)}
+                disabled={procesandoCloud}
               >
                 Asignar predios
               </Button>
@@ -506,15 +616,38 @@ export default function AsignacionDetalle() {
           {/* Fila 2: estado + offline (Regenerar → Descargar → Cargar) */}
           <Stack direction="row" spacing={1} alignItems="center">
             {['pendiente', 'procesando'].includes(estadoOffline?.estado_generacion) && (
-              <Chip
-                size="small"
-                color="info"
-                icon={<CircularProgress size={14} sx={{ color: 'inherit' }} />}
-                label={`Generando… ${estadoOffline?.progreso ?? 0}%`}
-              />
+              <Tooltip title="Cancelar generación">
+                <Chip
+                  size="small"
+                  color="info"
+                  icon={<CircularProgress size={14} sx={{ color: 'inherit' }} />}
+                  label={`Generando… ${estadoOffline?.progreso ?? 0}%`}
+                  onDelete={handleCancelarOperacion}
+                />
+              </Tooltip>
             )}
             {estadoOffline?.estado_generacion === 'error' && (
               <Chip size="small" color="error" label="Error generando" />
+            )}
+
+            {/* Chip de progreso de operación con QField Cloud */}
+            {cloudStatus?.operacion_en_curso && (
+              <Tooltip title={
+                cloudStatus.operacion_archivos_total > 0
+                  ? `${cloudStatus.operacion_archivos_procesados} de ${cloudStatus.operacion_archivos_total} archivos`
+                  : ''
+              }>
+                <Chip
+                  size="small"
+                  color={cloudStatus.operacion_en_curso === 'subir' ? 'info' : 'warning'}
+                  icon={<CircularProgress size={14} sx={{ color: 'inherit' }} />}
+                  label={
+                    cloudStatus.operacion_en_curso === 'subir'
+                      ? `Subiendo… ${cloudStatus.operacion_progreso ?? 0}%`
+                      : `Sincronizando… ${cloudStatus.operacion_progreso ?? 0}%`
+                  }
+                />
+              </Tooltip>
             )}
 
             <Button
@@ -524,6 +657,7 @@ export default function AsignacionDetalle() {
               onClick={() => generarProyectoOffline(false)}
               disabled={
                 generandoOffline ||
+                procesandoCloud ||
                 ['pendiente', 'procesando'].includes(estadoOffline?.estado_generacion)
               }
             >
@@ -539,7 +673,7 @@ export default function AsignacionDetalle() {
                 variant="outlined"
                 startIcon={descargando ? <CircularProgress size={16} /> : <DownloadIcon />}
                 onClick={handleDescargar}
-                disabled={descargando}
+                disabled={descargando || procesandoCloud}
               >
                 {descargando ? 'Descargando...' : 'Descargar offline'}
               </Button>
@@ -551,9 +685,47 @@ export default function AsignacionDetalle() {
                 color="primary"
                 startIcon={<UploadIcon />}
                 onClick={abrirModalCargarOffline}
+                disabled={procesandoCloud}
               >
                 Cargar offline
               </Button>
+            )}
+
+            {/* ── QField Cloud: botón único "Sincronizar" ──────────────
+                  Un solo botón que hace todo según el estado:
+                    - Si no está en cloud → sube y crea el proyecto
+                    - Si está en cloud con cambios del campo → pull
+                    - Si fue borrado de cloud → lo recrea (backend lo detecta)
+                  El backend decide qué hacer; el UI solo dispara la acción. */}
+            {puedeAdmin
+              && cloudStatus?.existe_offline_local
+              && cloudStatus?.estado_proyecto === 'terminado'
+              && !cloudStatus?.operacion_en_curso && (
+                <Tooltip
+                  title={
+                    cloudStatus?.ultima_sincronizacion
+                      ? `Última: ${new Date(cloudStatus.ultima_sincronizacion).toLocaleString()}` +
+                        (cloudStatus?.cloud_updated_at
+                          ? ` · Campo: ${new Date(cloudStatus.cloud_updated_at).toLocaleString()}`
+                          : '')
+                      : 'Aún no sincronizado con QField Cloud'
+                  }
+                >
+                  <span>
+                    <Button
+                      variant="outlined"
+                      color={cloudStatus?.sincronizaciones_pendientes ? 'warning' : 'primary'}
+                      startIcon={procesandoCloud
+                        ? <CircularProgress size={16} />
+                        : (cloudStatus?.existe_en_cloud ? <SyncIcon /> : <CloudUploadIcon />)
+                      }
+                      onClick={handleSincronizarCloud}
+                      disabled={procesandoCloud}
+                    >
+                      {procesandoCloud ? 'Procesando...' : 'Sincronizar con QField Cloud'}
+                    </Button>
+                  </span>
+                </Tooltip>
             )}
           </Stack>
 

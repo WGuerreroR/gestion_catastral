@@ -354,6 +354,26 @@ def get_qfield_cloud_id(db, proyecto_id: int):
     return row.qfield_cloud_project_id if row else None
 
 
+def actualizar_ultima_sincronizacion_cloud(db, proyecto_id: int):
+    """Marca el momento actual como última sincronización con QField Cloud."""
+    db.execute(text("""
+        UPDATE admin_asignacion
+        SET ultima_sincronizacion_cloud = NOW()
+        WHERE id = :id
+    """), {"id": proyecto_id})
+    db.commit()
+
+
+def get_ultima_sincronizacion_cloud(db, proyecto_id: int):
+    """Devuelve el timestamp de la última sincronización con QField Cloud, o None."""
+    row = db.execute(text("""
+        SELECT ultima_sincronizacion_cloud
+        FROM admin_asignacion
+        WHERE id = :id
+    """), {"id": proyecto_id}).fetchone()
+    return row.ultima_sincronizacion_cloud if row else None
+
+
 def actualizar_estado_generacion(db, proyecto_id: int, estado: str, error: str | None = None):
     db.execute(text("""
         UPDATE admin_asignacion

@@ -11,6 +11,7 @@ from services.qgis_export_service import (
     generar_paquete_proyecto, tarea_generar_proyecto, _comprimir_a_exports,generar_paquete_proyecto_2,
     _limpiar_recursos_anteriores, recursos_offline_existen,
 )
+from services.qfield_cloud_service import cloud_status
 from repositories import asignacion_proyecto_repo,persona_repo
 from schemas.asignacion_proyecto import (
     AsignacionProyectoCreate, AsignacionProyectoUpdate,
@@ -640,3 +641,111 @@ async def cargar_offline(
         raise HTTPException(400, msg)
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+# ── QField Cloud: subir / sincronizar / estado combinado ────────────────────
+
+@router.get("/{proyecto_id}/qfield/cloud-status")
+def qfield_cloud_status(
+    proyecto_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    """
+    Estado combinado local + QField Cloud. Usado por el UI para decidir
+    qué botón mostrar (Subir / Sincronizar / ninguno).
+    """
+
+
+    try:
+        return cloud_status(db, proyecto_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@router.post("/{proyecto_id}/qfield/subir-cloud", status_code=202)
+def qfield_subir_cloud(
+    proyecto_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _user=Depends(require_roles("administrador", "supervisor")),
+):
+    """
+    PUSH inicial en background. Devuelve 202 inmediato. El frontend hace
+    polling a /cloud-status para ver el progreso.
+    """
+    from services.qfield_cloud_service import validar_subida, tarea_subir_cloud
+
+    try:
+        validar_subida(db, proyecto_id)
+    except ValueError as e:
+        msg = str(e)
+        if msg == "Proyecto no encontrado":
+            raise HTTPException(404, msg)
+        if "en curso" in msg:
+            raise HTTPException(409, msg)
+        raise HTTPException(400, msg)
+
+    background_tasks.add_task(tarea_subir_cloud, proyecto_id)
+    return {"mensaje": "Subida encolada", "operacion": "subir"}
+
+
+@router.post("/{proyecto_id}/qfield/sincronizar-cloud", status_code=202)
+def qfield_sincronizar_cloud(
+    proyecto_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _user=Depends(require_roles("administrador", "supervisor")),
+):
+    """
+    PULL en background. Devuelve 202 inmediato. Polling vía /cloud-status.
+    """
+    from services.qfield_cloud_service import validar_sincronizacion, tarea_sincronizar_cloud
+
+    try:
+        validar_sincronizacion(db, proyecto_id)
+    except ValueError as e:
+        msg = str(e)
+        if msg == "Proyecto no encontrado":
+            raise HTTPException(404, msg)
+        if "en curso" in msg:
+            raise HTTPException(409, msg)
+        raise HTTPException(400, msg)
+
+    background_tasks.add_task(tarea_sincronizar_cloud, proyecto_id)
+    return {"mensaje": "Sincronización encolada", "operacion": "sincronizar"}
+
+
+@router.post("/{proyecto_id}/cancelar-operacion")
+def cancelar_operacion(
+    proyecto_id: int,
+    db: Session = Depends(get_db),
+    _user=Depends(require_roles("administrador", "supervisor")),
+):
+    """
+    Cancela una operación en curso sobre el proyecto (generación offline o
+    subida/sincronización con QField Cloud). Las tareas background revisan
+    el flag en puntos cooperativos y salen limpiamente.
+    """
+    from services.qgis_export_service import _cancelar_offline, _progreso
+    from services.qfield_cloud_service import _cloud_progreso
+
+    cancelado = []
+
+    if proyecto_id in _progreso:
+        _cancelar_offline[proyecto_id] = True
+        cancelado.append("offline")
+
+    if proyecto_id in _cloud_progreso:
+        _cloud_progreso[proyecto_id]["cancelar"] = True
+        cancelado.append("cloud")
+
+    if not cancelado:
+        return {"mensaje": "No hay operaciones en curso para cancelar", "cancelado": []}
+
+    return {
+        "mensaje":   f"Solicitud de cancelación enviada para: {', '.join(cancelado)}",
+        "cancelado": cancelado,
+    }
