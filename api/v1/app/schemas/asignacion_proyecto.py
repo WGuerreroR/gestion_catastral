@@ -2,7 +2,7 @@ from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime
 
-ESTADOS = ("campo", "validacion", "finalizado")
+ESTADOS = ("campo", "sincronizado", "validacion", "finalizado")
 
 class AsignacionProyectoCreate(BaseModel):
     clave_proyecto: str
@@ -41,8 +41,11 @@ class AsignacionProyectoResponse(BaseModel):
     responsable_id:      Optional[int] = None
     responsable:         Optional[str] = None
     total_predios:       Optional[int] = 0
+    codigo_manzana:      Optional[str] = None
     fecha_creacion:      Optional[datetime] = None
     fecha_actualizacion: Optional[datetime] = None
+    ultima_sincronizacion_cloud:   Optional[datetime] = None
+    ultima_sincronizacion_offline: Optional[datetime] = None
 
     class Config:
         from_attributes = True

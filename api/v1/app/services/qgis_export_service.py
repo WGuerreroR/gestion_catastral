@@ -102,6 +102,11 @@ def generar_qgz_centrado(db, proyecto_id: int) -> tuple[str, str, str]:
     # 4. Comprimir todo el directorio a .zip
     zip_path = qgis_svc.comprimir(temp_dir_root)
 
+    # 5. Agregar carpetas vacías offline/ y cloud/ 
+    with zipfile.ZipFile(zip_path, "a", zipfile.ZIP_DEFLATED) as zf:
+        for carpeta in ("offline/", "cloud/"):
+            zf.writestr(zipfile.ZipInfo(carpeta), b"")
+
     return zip_path, clave, temp_dir_root
 
 

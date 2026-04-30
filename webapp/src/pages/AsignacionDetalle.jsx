@@ -35,8 +35,15 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import api from '../api/axios'
 import { getErrorMessage } from '../utils/errorHandler'
-import ModalMetodoAsignacion from '../components/ModalMetodoAsignacion'
-import ModalMapaAsignacion   from '../components/ModalMapaAsignacion'
+import ModalMetodoAsignacion       from '../components/ModalMetodoAsignacion'
+import ModalMapaAsignacion         from '../components/ModalMapaAsignacion'
+import ModalAplicarPaqueteOffline  from '../components/ModalAplicarPaqueteOffline'
+import ModalFotosPredio            from '../components/ModalFotosPredio'
+import ModalDetalleSync            from '../components/ModalDetalleSync'
+import PublishIcon                 from '@mui/icons-material/Publish'
+import PhotoLibraryIcon            from '@mui/icons-material/PhotoLibrary'
+import HistoryIcon                 from '@mui/icons-material/History'
+import VisibilityIcon              from '@mui/icons-material/Visibility'
 
 const MAP_HEIGHT = 550
 
@@ -51,6 +58,47 @@ const chipEstado = {
   campo:      'warning',
   validado:   'info',
   finalizado: 'success',
+}
+
+const colorEstadoSync = {
+  ok:           'success',
+  parcial:      'warning',
+  error:        'error',
+  idempotente:  'info',
+  encolado:     'default',
+  corriendo:    'info',
+}
+
+function columnasHistorialSync({ onAbrirDetalle }) {
+  return [
+    {
+      field: 'fecha_sync', headerName: 'Fecha', width: 170,
+      renderCell: ({ value }) =>
+        value ? new Date(value).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : '—',
+    },
+    { field: 'paquete_nombre', headerName: 'Paquete', width: 220 },
+    {
+      field: 'estado', headerName: 'Estado', width: 130,
+      renderCell: ({ value }) => (
+        <Chip size="small" label={value || '—'} color={colorEstadoSync[value] || 'default'} />
+      ),
+    },
+    { field: 'usuario', headerName: 'Usuario', width: 110 },
+    {
+      field: 'forzado', headerName: 'Forzado', width: 90,
+      renderCell: ({ value }) => value ? <Chip size="small" color="warning" label="forzado" /> : null,
+    },
+    {
+      field: '__detalle', headerName: 'Detalle', width: 100, sortable: false, filterable: false,
+      renderCell: ({ row }) => (
+        <Tooltip title="Ver detalle del sync">
+          <IconButton size="small" onClick={() => onAbrirDetalle(row.id)}>
+            <VisibilityIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      ),
+    },
+  ]
 }
 
 const estiloArea = new Style({
@@ -114,10 +162,32 @@ export default function AsignacionDetalle() {
   const [procesandoCloud, setProcesandoCloud] = useState(false)
   const cloudPollingRef = useRef(null)
 
+  // Sync inverso: aplicar paquete offline editado a PostGIS
+  const [modalAplicarOffline, setModalAplicarOffline] = useState(false)
+
+  // Galería de fotos de un predio
+  const [modalFotos, setModalFotos] = useState({ open: false, idOperacion: null })
+
+  // Historial de syncs offline + modal de detalle reusable
+  const [historialSync, setHistorialSync] = useState([])
+  const [mostrarHistorial, setMostrarHistorial] = useState(false)
+  const [modalDetalleSync, setModalDetalleSync] = useState({ open: false, syncId: null })
+
   const mostrarError   = (msg) => { setError(msg);   setTimeout(() => setError(''),   4000) }
   const mostrarSuccess = (msg) => { setSuccess(msg); setTimeout(() => setSuccess(''), 4000) }
 
   // ── Cargar datos ─────────────────────────────────────────
+  const cargarHistorialSync = useCallback(async () => {
+    try {
+      const r = await api.get(`/proyectos/${id}/offline/historial-sync?limit=50`)
+      setHistorialSync(Array.isArray(r.data) ? r.data : [])
+    } catch {
+      // No bloquear la página si el historial falla; típicamente la
+      // tabla sync_history aún no fue migrada en este entorno.
+      setHistorialSync([])
+    }
+  }, [id])
+
   const cargarDatos = useCallback(async () => {
     setLoading(true)
     geojsonCargado.current = false
@@ -129,12 +199,13 @@ export default function AsignacionDetalle() {
       ])
       setProyecto(prRes.data)
       setPredios(pdRes.data)
+      cargarHistorialSync()  // fire-and-forget; no bloquea el render
     } catch {
       mostrarError('Error cargando datos del proyecto')
     } finally {
       setLoading(false)
     }
-  }, [id])
+  }, [id, cargarHistorialSync])
 
   useEffect(() => { cargarDatos() }, [cargarDatos])
 
@@ -547,7 +618,45 @@ export default function AsignacionDetalle() {
       renderCell: ({ value }) => (
         <Chip label={value} size="small" color={chipEstado[value] || 'default'} />
       )
-    }
+    },
+    {
+      field: 'ultima_sync_offline',
+      headerName: 'Última sync',
+      width: 160,
+      renderCell: ({ value }) => {
+        if (!value) return <Typography variant="caption" color="text.secondary">—</Typography>
+        const fecha = new Date(value)
+        const horasDesde = (Date.now() - fecha.getTime()) / 36e5
+        const reciente = horasDesde < 24
+        return (
+          <Chip
+            size="small"
+            color={reciente ? 'success' : 'default'}
+            label={fecha.toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}
+          />
+        )
+      },
+    },
+    {
+      field: '__fotos',
+      headerName: 'Fotos',
+      width: 80,
+      sortable: false,
+      filterable: false,
+      renderCell: ({ row }) => (
+        <Tooltip title="Ver fotos del predio">
+          <IconButton
+            size="small"
+            onClick={(e) => {
+              e.stopPropagation()
+              setModalFotos({ open: true, idOperacion: row.id_operacion })
+            }}
+          >
+            <PhotoLibraryIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      ),
+    },
   ]
 
   if (loading) {
@@ -576,9 +685,10 @@ export default function AsignacionDetalle() {
               label={proyecto?.estado}
               size="small"
               color={
-                proyecto?.estado === 'campo'      ? 'warning'  :
-                proyecto?.estado === 'validado'   ? 'info'     :
-                proyecto?.estado === 'finalizado' ? 'success'  : 'default'
+                proyecto?.estado === 'campo'        ? 'warning'  :
+                proyecto?.estado === 'sincronizado' ? 'primary'  :
+                proyecto?.estado === 'validacion'   ? 'info'     :
+                proyecto?.estado === 'finalizado'   ? 'success'  : 'default'
               }
             />
           </Box>
@@ -602,14 +712,24 @@ export default function AsignacionDetalle() {
               {descargandoQGZ ? 'Descargando...' : 'Descargar área'}
             </Button>
             {puedeAdmin && (
-              <Button
-                variant="contained"
-                startIcon={<AssignmentIcon />}
-                onClick={() => setModalMetodo(true)}
-                disabled={procesandoCloud}
+              <Tooltip
+                title={
+                  proyecto?.estado !== 'campo'
+                    ? `Solo se pueden asignar predios en estado 'campo' (actual: '${proyecto?.estado}')`
+                    : ''
+                }
               >
-                Asignar predios
-              </Button>
+                <span>
+                  <Button
+                    variant="contained"
+                    startIcon={<AssignmentIcon />}
+                    onClick={() => setModalMetodo(true)}
+                    disabled={procesandoCloud || proyecto?.estado !== 'campo'}
+                  >
+                    Asignar predios
+                  </Button>
+                </span>
+              </Tooltip>
             )}
           </Stack>
 
@@ -649,7 +769,7 @@ export default function AsignacionDetalle() {
                 />
               </Tooltip>
             )}
-
+  {/*
             <Button
               variant="outlined"
               color="warning"
@@ -666,7 +786,8 @@ export default function AsignacionDetalle() {
                 : estadoOffline?.estado_generacion === 'terminado' || estadoOffline?.estado_generacion === 'error'
                   ? 'Regenerar offline'
                   : 'Generar offline'}
-            </Button>
+            </Button>*/}
+            
 
             {estadoOffline?.estado_generacion === 'terminado' && estadoOffline?.archivo_existe && (
               <Button
@@ -678,7 +799,7 @@ export default function AsignacionDetalle() {
                 {descargando ? 'Descargando...' : 'Descargar offline'}
               </Button>
             )}
-
+          {/*
             {puedeAdmin && (
               <Button
                 variant="outlined"
@@ -690,6 +811,25 @@ export default function AsignacionDetalle() {
                 Cargar offline
               </Button>
             )}
+            */}
+
+            {/* Sincronizar offline: cierre del ciclo, trae los cambios
+                editados en QField de vuelta a la base de datos. */}
+            {puedeAdmin && (
+              <Tooltip title="Subir un .zip editado en QField y aplicar los cambios a la base de datos">
+                <span>
+                  <Button
+                    variant="outlined"
+                    color="success"
+                    startIcon={<PublishIcon />}
+                    onClick={() => setModalAplicarOffline(true)}
+                    disabled={procesandoCloud}
+                  >
+                    Sincronizar offline
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
 
             {/* ── QField Cloud: botón único "Sincronizar" ──────────────
                   Un solo botón que hace todo según el estado:
@@ -697,7 +837,7 @@ export default function AsignacionDetalle() {
                     - Si está en cloud con cambios del campo → pull
                     - Si fue borrado de cloud → lo recrea (backend lo detecta)
                   El backend decide qué hacer; el UI solo dispara la acción. */}
-            {puedeAdmin
+          {/*   {puedeAdmin
               && cloudStatus?.existe_offline_local
               && cloudStatus?.estado_proyecto === 'terminado'
               && !cloudStatus?.operacion_en_curso && (
@@ -712,7 +852,7 @@ export default function AsignacionDetalle() {
                   }
                 >
                   <span>
-                    <Button
+                   <Button
                       variant="outlined"
                       color={cloudStatus?.sincronizaciones_pendientes ? 'warning' : 'primary'}
                       startIcon={procesandoCloud
@@ -724,9 +864,10 @@ export default function AsignacionDetalle() {
                     >
                       {procesandoCloud ? 'Procesando...' : 'Sincronizar con QField Cloud'}
                     </Button>
-                  </span>
+             
+                  </span>       
                 </Tooltip>
-            )}
+            )}*/}
           </Stack>
 
         </Stack>
@@ -773,9 +914,60 @@ export default function AsignacionDetalle() {
                 </Typography>
               </Box>
             </Grid>
+
+            {/* Última sincronización offline (paquete entero) */}
+            <Grid item xs={12} sm={6}>
+              <Box>
+                <Typography variant="caption" color="text.secondary">
+                  Última sincronización offline
+                </Typography>
+                <Typography variant="body2" fontWeight={500}>
+                  {proyecto?.ultima_sincronizacion_offline
+                    ? new Date(proyecto.ultima_sincronizacion_offline).toLocaleString('es-CO', {
+                        dateStyle: 'medium', timeStyle: 'short',
+                      })
+                    : <span style={{ color: '#888' }}>Nunca sincronizado</span>}
+                </Typography>
+                {historialSync.length > 0 && (
+                  <Button
+                    size="small"
+                    variant="text"
+                    startIcon={<HistoryIcon fontSize="small" />}
+                    onClick={() => setMostrarHistorial(v => !v)}
+                    sx={{ mt: 0.5, textTransform: 'none', minWidth: 0, p: 0.5 }}
+                  >
+                    {mostrarHistorial ? 'Ocultar' : 'Ver'} historial de sincronización ({historialSync.length})
+                  </Button>
+                )}
+              </Box>
+            </Grid>
           </Grid>
         </CardContent>
       </Card>
+
+      {/* Historial de sincronizaciones offline (sólo cuando el usuario lo pidió) */}
+      {mostrarHistorial && historialSync.length > 0 && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.5 }}>
+              <HistoryIcon color="action" fontSize="small" />
+              <Typography variant="subtitle2">
+                Historial de sincronizaciones offline ({historialSync.length})
+              </Typography>
+            </Box>
+            <DataGrid
+              autoHeight
+              density="compact"
+              rows={historialSync}
+              columns={columnasHistorialSync({ onAbrirDetalle: (id) => setModalDetalleSync({ open: true, syncId: id }) })}
+              pageSizeOptions={[5, 10, 25]}
+              initialState={{ pagination: { paginationModel: { pageSize: 5 } } }}
+              disableRowSelectionOnClick
+              getRowId={(r) => r.id}
+            />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Tabs */}
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
@@ -1005,6 +1197,41 @@ export default function AsignacionDetalle() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Detalle de un sync histórico (abierto desde la tabla del card historial) */}
+      <ModalDetalleSync
+        open={modalDetalleSync.open}
+        onClose={() => setModalDetalleSync({ open: false, syncId: null })}
+        syncId={modalDetalleSync.syncId}
+      />
+
+      {/* Galería de fotos del predio (lc_predio_p + cr_caracteristicas...) */}
+      <ModalFotosPredio
+        open={modalFotos.open}
+        onClose={() => setModalFotos({ open: false, idOperacion: null })}
+        proyectoId={id}
+        idOperacion={modalFotos.idOperacion}
+      />
+
+      {/* Modal para aplicar paquete offline editado a PostGIS */}
+      <ModalAplicarPaqueteOffline
+        open={modalAplicarOffline}
+        onClose={() => setModalAplicarOffline(false)}
+        proyectoId={id}
+        estadoAsignacion={proyecto?.estado}
+        esAdmin={user?.roles?.includes('administrador')}
+        onAppliedOk={(detalle) => {
+          mostrarSuccess(
+            `Sync ok: ${
+              Object.values(detalle.resumen || {})
+                .reduce((acc, r) => acc + (r.added || 0) + (r.updated || 0), 0)
+            } cambios aplicados a PostGIS`
+          )
+          // Refrescar info del proyecto (estado pudo haber cambiado de campo→sincronizado)
+          cargarDatos()
+          cargarHistorialSync()
+        }}
+      />
 
     </Box>
   )

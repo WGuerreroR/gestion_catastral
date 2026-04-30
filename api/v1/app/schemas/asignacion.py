@@ -18,7 +18,7 @@ class CambioEstado(BaseModel):
 
     @field_validator("estado")
     def estado_valido(cls, v):
-        validos = ("campo", "validacion", "completado")
+        validos = ("campo", "sincronizado", "validacion", "completado")
         if v not in validos:
             raise ValueError(f"Estado inválido. Use: {validos}")
         return v

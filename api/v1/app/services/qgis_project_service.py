@@ -28,7 +28,9 @@ from qgis.core import (
     QgsCsException,
 )
 
-PROYECTO_BASE_DIR = "/app/data/proyecto_base"
+# Ruta absoluta a `proyecto_base/` dentro del contenedor. Configurable
+# por env var `PROYECTO_BASE_PATH` (compartida con qfield_photo_service).
+PROYECTO_BASE_DIR = os.environ.get("PROYECTO_BASE_PATH", "/app/data/proyecto_base")
 
 
 class QgisProjectService:

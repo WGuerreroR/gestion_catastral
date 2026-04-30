@@ -31,4 +31,5 @@ COPY app .
 
 EXPOSE 8400
 
+#CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8400", "--no-access-log"]
 CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8400"]

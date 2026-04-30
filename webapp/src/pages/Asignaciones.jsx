@@ -24,9 +24,10 @@ import ModalMetodoAsignacion from '../components/ModalMetodoAsignacion'
 import ModalMapaAsignacion   from '../components/ModalMapaAsignacion'
 
 const coloresEstado = {
-  campo:      'warning',
-  validacion: 'info',
-  finalizado: 'success'
+  campo:        'warning',
+  sincronizado: 'primary',
+  validacion:   'info',
+  finalizado:   'success'
 }
 
 const FORM_INICIAL = {
@@ -367,14 +368,23 @@ export default function Asignaciones() {
 
           {puedeAdmin && (
             <>
-              <Tooltip title="Asignar predios">
-                <IconButton
-                  size="small"
-                  color="success"
-                  onClick={() => abrirAsignacion(row)}
-                >
-                  <AssignmentIcon fontSize="small" />
-                </IconButton>
+              <Tooltip
+                title={
+                  row.estado === 'campo'
+                    ? 'Asignar predios'
+                    : `Solo se pueden asignar predios en estado 'campo' (actual: '${row.estado}')`
+                }
+              >
+                <span>
+                  <IconButton
+                    size="small"
+                    color="success"
+                    onClick={() => abrirAsignacion(row)}
+                    disabled={row.estado !== 'campo'}
+                  >
+                    <AssignmentIcon fontSize="small" />
+                  </IconButton>
+                </span>
               </Tooltip>
               <Tooltip title="Editar">
                 <IconButton size="small" onClick={() => abrirEditar(row)}>
@@ -589,6 +599,7 @@ export default function Asignaciones() {
                 onChange={e => setForm({ ...form, estado: e.target.value })}
               >
                 <MenuItem value="campo">Campo</MenuItem>
+                <MenuItem value="sincronizado">Sincronizado</MenuItem>
                 <MenuItem value="validacion">Validación</MenuItem>
                 <MenuItem value="finalizado">Finalizado</MenuItem>
               </TextField>

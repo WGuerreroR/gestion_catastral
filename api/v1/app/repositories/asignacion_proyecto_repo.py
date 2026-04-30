@@ -25,6 +25,8 @@ def get_by_id(db: Session, proyecto_id: int):
             a.id, a.clave_proyecto, a.descripcion,
             a.estado, a.fecha_creacion, a.fecha_actualizacion,
             a.codigo_manzana,
+            a.ultima_sincronizacion_cloud,
+            a.ultima_sincronizacion_offline,
             p.id AS responsable_id,
             p.primer_nombre || ' ' || p.primer_apellido AS responsable
         FROM admin_asignacion a
@@ -243,6 +245,7 @@ def get_predios(db: Session, proyecto_id: int):
             p.numero_predial,
             p.matricula_inmobiliaria,
             p.avaluo_catastral,
+            p.ultima_sync_offline,
             t.area_terreno,
             t.etiqueta
         FROM admin_persona_predio ap
