@@ -1,0 +1,243 @@
+{
+  "id": "predio-completo-lectura",
+  "version": "1.0",
+  "descripcion": "Vista completa del predio en modo solo lectura. Iteración inicial: solo secciones registro_unico (predio + terreno). Las secciones lista, subsección y mapa se agregan en pasos siguientes.",
+  "modo_default": "view",
+  "permite_toggle_modo": false,
+  "fuente_datos": {
+    "endpoint": "/predios/{busqueda}/completo",
+    "param_busqueda": "id_operacion",
+    "params_aceptados": ["id_operacion", "numero_predial"]
+  },
+  "exportacion_pdf": {
+    "habilitada": true,
+    "endpoint": "/predios/{id_operacion}/export-pdf",
+    "label_boton": "Exportar a PDF"
+  },
+  "secciones": [
+    {
+      "id": "mapa_predio",
+      "tipo": "mapa",
+      "titulo": "Ubicación y geometrías",
+      "icono": "map",
+      "expandida_por_default": true,
+      "altura": 500,
+      "permite_pantalla_completa": true,
+      "srid_display": 9377,
+      "mostrar_coordenadas_cursor": true,
+      "mostrar_escala": true,
+      "capa_base": "osm",
+      "capas": [
+        {
+          "id": "manzana_contexto",
+          "label": "Manzana",
+          "fuente": "endpoint",
+          "endpoint": "/spatial/manzana/{codigo_manzana}",
+          "tipo_geometria": "Polygon",
+          "estilo": {
+            "fillColor": "rgba(156, 39, 176, 0.08)",
+            "strokeColor": "#6A1B9A",
+            "strokeWidth": 4,
+            "strokeDashArray": [8, 4]
+          },
+          "visible_default": true,
+          "z_index": 1,
+          "interactive": false
+        },
+        {
+          "id": "terreno",
+          "label": "Terreno",
+          "fuente": "predio_data",
+          "ruta_dato": "terreno.geometry",
+          "tipo_geometria": "MultiPolygon",
+          "estilo": {
+            "fillColor": "rgba(33, 150, 243, 0.25)",
+            "strokeColor": "#1976D2",
+            "strokeWidth": 2
+          },
+          "visible_default": true,
+          "z_index": 2,
+          "interactive": true
+        },
+        {
+          "id": "unidades",
+          "label": "Unidades de construcción",
+          "fuente": "predio_data",
+          "ruta_dato": "unidades[].geometry",
+          "tipo_geometria": "MultiPolygon",
+          "es_coleccion": true,
+          "id_feature": "id_operacion_unidad_const",
+          "estilo": {
+            "fillColor": "rgba(255, 152, 0, 0.4)",
+            "strokeColor": "#F57C00",
+            "strokeWidth": 2
+          },
+          "estilo_resaltado": {
+            "fillColor": "rgba(255, 152, 0, 0.7)",
+            "strokeColor": "#E65100",
+            "strokeWidth": 4
+          },
+          "etiqueta_feature": {
+            "campo": "etiqueta",
+            "color": "#000",
+            "background": "rgba(255, 255, 255, 0.85)"
+          },
+          "visible_default": true,
+          "z_index": 3,
+          "interactive": true,
+          "linked_section_id": "unidades"
+        }
+      ]
+    },
+    {
+      "id": "datos_predio",
+      "titulo": "Datos del predio",
+      "icono": "home",
+      "modo": "view",
+      "expandida_por_default": true,
+      "tipo": "registro_unico",
+      "tabla_origen": "lc_predio_p",
+      "id_pk_field": "id_operacion",
+      "roles_edicion": ["administrador", "supervisor", "gerente"],
+      "campos": [
+        { "field": "id_operacion",          "label": "ID de operación",      "widget": "text" },
+        { "field": "numero_predial",        "label": "Número predial",       "widget": "text",
+          "auditoria": { "habilitada": true } },
+        { "field": "npn",                   "label": "NPN",                  "widget": "text",
+          "auditoria": { "habilitada": true } },
+        { "field": "npn_etiqueta",          "label": "Etiqueta NPN",         "widget": "text" },
+        { "field": "nombre_predio",         "label": "Nombre del predio",    "widget": "text" },
+        { "field": "matricula_inmobiliaria","label": "Matrícula inmobiliaria","widget": "text" },
+        { "field": "municipio",             "label": "Municipio",            "widget": "text" },
+        { "field": "departamento",          "label": "Departamento",         "widget": "text" },
+        { "field": "sector_ciudad",         "label": "Sector / Ciudad",      "widget": "text" },
+        { "field": "complemento",           "label": "Complemento",          "widget": "text" },
+        { "field": "tipo",                  "label": "Tipo de predio",       "widget": "select", "domain": "lc_prediotipo" },
+        { "field": "condicion_predio",      "label": "Condición del predio", "widget": "select", "domain": "lc_condicionprediotipo" },
+        { "field": "metodo",                "label": "Método",               "widget": "select", "domain": "lc_metodotipo" },
+        { "field": "procedimiento_catastral_reg", "label": "Procedimiento catastral", "widget": "select", "domain": "procedimiento_catresg" },
+        { "field": "restriccion",           "label": "Restricción",          "widget": "select", "domain": "restriccion" },
+        { "field": "area_total_terreno",    "label": "Área total terreno (m²)",    "widget": "number", "decimales": 2 },
+        { "field": "area_total_construida", "label": "Área total construida (m²)", "widget": "number", "decimales": 2 },
+        { "field": "avaluo_catastral",      "label": "Avalúo catastral",     "widget": "number", "decimales": 0 },
+        { "field": "estrato",               "label": "Estrato",              "widget": "number" },
+        { "field": "observacion_general",   "label": "Observación general",  "widget": "textarea", "rows": 3,
+          "auditoria": { "habilitada": true } },
+        { "field": "foto",                  "label": "Foto general",         "widget": "photo" },
+        { "field": "foto_2",                "label": "Foto general 2",       "widget": "photo" }
+      ]
+    },
+    {
+      "id": "terreno",
+      "titulo": "Terreno",
+      "icono": "terrain",
+      "modo": "view",
+      "expandida_por_default": true,
+      "tipo": "registro_unico",
+      "tabla_origen": "cr_terreno",
+      "id_pk_field": "globalid",
+      "roles_edicion": ["administrador", "supervisor"],
+      "campos": [
+        { "field": "globalid",     "label": "GlobalID",        "widget": "text" },
+        { "field": "npn",          "label": "NPN",             "widget": "text" },
+        { "field": "etiqueta",     "label": "Etiqueta",        "widget": "text" },
+        { "field": "area_terreno", "label": "Área (m²)",       "widget": "number", "decimales": 2,
+          "auditoria": { "habilitada": true } },
+        { "field": "geometry",     "label": "Geometría",       "widget": "geometry" }
+      ]
+    },
+    {
+      "id": "unidades",
+      "titulo": "Unidades de construcción",
+      "icono": "apartment",
+      "modo": "view",
+      "expandida_por_default": true,
+      "tipo": "lista",
+      "tabla_origen": "cr_unidadconstruccion",
+      "fk_padre": "id_operacion_predio",
+      "id_item": "id_operacion_unidad_const",
+      "id_pk_field": "id_operacion_uc_geo",
+      "label_item": "Unidad {{etiqueta}}",
+      "campos": [
+        { "field": "id_operacion_unidad_const", "label": "ID unidad",        "widget": "text" },
+        { "field": "etiqueta",                  "label": "Etiqueta",         "widget": "text" },
+        { "field": "tipo_planta",               "label": "Tipo de planta",   "widget": "text" },
+        { "field": "planta_ubicacion",          "label": "Planta ubicación", "widget": "text" },
+        { "field": "altura",                    "label": "Altura (m)",       "widget": "number", "decimales": 2 },
+        { "field": "area_construida",           "label": "Área construida (m²)", "widget": "number", "decimales": 2 },
+        { "field": "geometry", "label": "Geometría", "widget": "geometry",
+          "vincular_capa_id": "unidades", "id_feature_field": "id_operacion_unidad_const" }
+      ],
+      "subseccion": {
+        "id": "caracteristicas",
+        "titulo": "Características y fotos",
+        "tabla_origen": "cr_caracteristicasunidadconstruccion",
+        "id_pk_field": "id_operacion_unidad_cons",
+        "data_key": "caracteristicas",
+        "roles_edicion": ["administrador", "supervisor"],
+        "campos": [
+          { "field": "tipo_unidad_construccion", "label": "Tipo de construcción",
+            "widget": "select", "domain": "cr_unidadconstrucciontipo",
+            "auditoria": { "habilitada": true } },
+          { "field": "uso",                "label": "Uso",
+            "widget": "select", "domain": "cr_usoconstipo",
+            "auditoria": { "habilitada": true } },
+          { "field": "total_plantas",      "label": "Total plantas",        "widget": "number" },
+          { "field": "anio_construccion",  "label": "Año construcción",     "widget": "number" },
+          { "field": "area_construida",    "label": "Área construida (m²)", "widget": "number", "decimales": 2,
+            "auditoria": { "habilitada": true } },
+          { "field": "total_habitaciones", "label": "Habitaciones",         "widget": "number" },
+          { "field": "total_banios",       "label": "Baños",                "widget": "number" },
+          { "field": "observaciones",      "label": "Observaciones",        "widget": "textarea", "rows": 2 },
+          { "field": "foto_fachada",       "label": "Foto fachada",         "widget": "photo" },
+          { "field": "foto_cocina",        "label": "Foto cocina",          "widget": "photo" },
+          { "field": "foto_banio",         "label": "Foto baño",            "widget": "photo" },
+          { "field": "foto_acabados",      "label": "Foto acabados",        "widget": "photo" },
+          { "field": "foto_anexo",         "label": "Foto anexo",           "widget": "photo" },
+          { "field": "foto_industrial",    "label": "Foto industrial",      "widget": "photo" }
+        ]
+      }
+    },
+    {
+      "id": "interesados",
+      "titulo": "Interesados",
+      "icono": "people",
+      "modo": "view",
+      "expandida_por_default": false,
+      "tipo": "lista",
+      "tabla_origen": "cr_interesado",
+      "fk_padre": "id_operacion_predio",
+      "id_item": "globalid",
+      "id_pk_field": "globalid",
+      "label_item": "{{nombre}}",
+      "campos": [
+        { "field": "tipo",            "label": "Tipo de interesado",
+          "widget": "select", "domain": "cr_interesadotipo",
+          "ayuda": "Cambia los campos visibles entre persona natural y jurídica" },
+        { "field": "tipo_documento",  "label": "Tipo documento",
+          "widget": "select", "domain": "cr_documentotipo" },
+        { "field": "documento_identidad", "label": "Documento", "widget": "text" },
+
+        { "field": "primer_nombre",   "label": "Primer nombre",   "widget": "text",
+          "visible_if": { "field": "tipo", "operator": "==", "value": "0" } },
+        { "field": "segundo_nombre",  "label": "Segundo nombre",  "widget": "text",
+          "visible_if": { "field": "tipo", "operator": "==", "value": "0" } },
+        { "field": "primer_apellido", "label": "Primer apellido", "widget": "text",
+          "visible_if": { "field": "tipo", "operator": "==", "value": "0" } },
+        { "field": "segundo_apellido","label": "Segundo apellido","widget": "text",
+          "visible_if": { "field": "tipo", "operator": "==", "value": "0" } },
+        { "field": "sexo",            "label": "Sexo",            "widget": "select", "domain": "sexo",
+          "visible_if": { "field": "tipo", "operator": "==", "value": "0" } },
+        { "field": "grupo_etnico",    "label": "Grupo étnico",
+          "widget": "select", "domain": "cr_grupoetnicotipo",
+          "visible_if": { "field": "tipo", "operator": "==", "value": "0" } },
+
+        { "field": "razon_social",    "label": "Razón social",    "widget": "text",
+          "visible_if": { "field": "tipo", "operator": "==", "value": "1" } },
+
+        { "field": "porcentaje_propiedad", "label": "% propiedad", "widget": "number", "decimales": 2 },
+        { "field": "celular",         "label": "Celular", "widget": "text" }
+      ]
+    }
+  ]
+}

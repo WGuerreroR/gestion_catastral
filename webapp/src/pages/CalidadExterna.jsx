@@ -16,6 +16,7 @@ import HomeWorkIcon      from '@mui/icons-material/HomeWork'
 import LocationCityIcon  from '@mui/icons-material/LocationCity'
 import UploadFileIcon    from '@mui/icons-material/UploadFile'
 import ListIcon          from '@mui/icons-material/List'
+import DeleteIcon        from '@mui/icons-material/Delete'
 import OlMap        from 'ol/Map'
 import View         from 'ol/View'
 import TileLayer    from 'ol/layer/Tile'
@@ -511,7 +512,10 @@ export default function CalidadExterna() {
   const [proyectos,    setProyectos]    = useState([])
   const [loading,      setLoading]      = useState(true)
   const [error,        setError]        = useState('')
+  const [success,      setSuccess]      = useState('')
   const [modalAbierto, setModalAbierto] = useState(false)
+  const [proyectoEliminar, setProyectoEliminar] = useState(null)
+  const [eliminando,   setEliminando]   = useState(false)
 
   const cargar = useCallback(async () => {
     setLoading(true)
@@ -526,6 +530,22 @@ export default function CalidadExterna() {
   }, [])
 
   useEffect(() => { cargar() }, [cargar])
+
+  const handleEliminar = async () => {
+    if (!proyectoEliminar) return
+    setEliminando(true)
+    try {
+      await api.delete(`/calidad-externa/${proyectoEliminar.id}`)
+      setSuccess(`Proyecto "${proyectoEliminar.nombre}" eliminado`)
+      setTimeout(() => setSuccess(''), 4000)
+      setProyectoEliminar(null)
+      cargar()
+    } catch (e) {
+      setError(getErrorMessage(e, 'Error al eliminar el proyecto'))
+    } finally {
+      setEliminando(false)
+    }
+  }
 
   const columnas = [
     {
@@ -556,15 +576,24 @@ export default function CalidadExterna() {
         value ? new Date(value).toLocaleDateString('es-CO') : '—'
     },
     {
-      field: 'acciones', headerName: '', width: 70, sortable: false,
+      field: 'acciones', headerName: '', width: 110, sortable: false,
       renderCell: ({ row }) => (
-        <Tooltip title="Ver detalle">
-          <IconButton size="small" color="warning"
-            onClick={() => navigate(`/calidad-externa/${row.id}`)}
-          >
-            <VisibilityIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
+        <Stack direction="row" spacing={0.5}>
+          <Tooltip title="Ver detalle">
+            <IconButton size="small" color="warning"
+              onClick={() => navigate(`/calidad-externa/${row.id}`)}
+            >
+              <VisibilityIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Eliminar proyecto">
+            <IconButton size="small" color="error"
+              onClick={() => setProyectoEliminar(row)}
+            >
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Stack>
       )
     }
   ]
@@ -586,7 +615,8 @@ export default function CalidadExterna() {
         </Button>
       </Box>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {error   && <Alert severity="error"   sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
+      {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess('')}>{success}</Alert>}
 
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 8 }}>
@@ -609,6 +639,38 @@ export default function CalidadExterna() {
         onClose={() => setModalAbierto(false)}
         onCreado={cargar}
       />
+
+      <Dialog
+        open={Boolean(proyectoEliminar)}
+        onClose={() => !eliminando && setProyectoEliminar(null)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Eliminar proyecto de calidad externa</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            ¿Seguro que deseas eliminar el proyecto{' '}
+            <strong>{proyectoEliminar?.nombre}</strong>? Esta acción no se puede
+            deshacer y se eliminarán también el universo y la muestra asociados.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setProyectoEliminar(null)} disabled={eliminando}>
+            Cancelar
+          </Button>
+          <Button
+            variant="contained" color="error"
+            onClick={handleEliminar}
+            disabled={eliminando}
+            startIcon={eliminando
+              ? <CircularProgress size={16} color="inherit" />
+              : <DeleteIcon />
+            }
+          >
+            {eliminando ? 'Eliminando...' : 'Eliminar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   )
 }

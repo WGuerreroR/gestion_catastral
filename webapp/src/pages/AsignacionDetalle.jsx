@@ -44,6 +44,8 @@ import PublishIcon                 from '@mui/icons-material/Publish'
 import PhotoLibraryIcon            from '@mui/icons-material/PhotoLibrary'
 import HistoryIcon                 from '@mui/icons-material/History'
 import VisibilityIcon              from '@mui/icons-material/Visibility'
+import PredioVisor                 from '../components/predio-visor/PredioVisor'
+import predioCompletoLectura       from '../config/predio-forms/predio-completo-lectura.json'
 
 const MAP_HEIGHT = 550
 
@@ -167,6 +169,9 @@ export default function AsignacionDetalle() {
 
   // Galería de fotos de un predio
   const [modalFotos, setModalFotos] = useState({ open: false, idOperacion: null })
+
+  // Visor de detalles del predio (PredioVisor en modal)
+  const [modalDetalles, setModalDetalles] = useState({ open: false, idOperacion: null })
 
   // Historial de syncs offline + modal de detalle reusable
   const [historialSync, setHistorialSync] = useState([])
@@ -657,6 +662,26 @@ export default function AsignacionDetalle() {
         </Tooltip>
       ),
     },
+    {
+      field: '__detalles',
+      headerName: 'Detalles',
+      width: 90,
+      sortable: false,
+      filterable: false,
+      renderCell: ({ row }) => (
+        <Tooltip title="Ver detalles del predio">
+          <IconButton
+            size="small"
+            onClick={(e) => {
+              e.stopPropagation()
+              setModalDetalles({ open: true, idOperacion: row.id_operacion })
+            }}
+          >
+            <VisibilityIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      ),
+    },
   ]
 
   if (loading) {
@@ -814,8 +839,10 @@ export default function AsignacionDetalle() {
             */}
 
             {/* Sincronizar offline: cierre del ciclo, trae los cambios
-                editados en QField de vuelta a la base de datos. */}
-            {puedeAdmin && (
+                editados en QField de vuelta a la base de datos.
+                Se oculta cuando la asignación pasó a 'validacion' o
+                'finalizado' (ya no se aceptan cambios desde campo). */}
+            {puedeAdmin && !['validacion', 'finalizado'].includes(proyecto?.estado) && (
               <Tooltip title="Subir un .zip editado en QField y aplicar los cambios a la base de datos">
                 <span>
                   <Button
@@ -1026,9 +1053,23 @@ export default function AsignacionDetalle() {
         {predioActivo && (
           <Card sx={{ width: 260, overflow: 'auto', height: MAP_HEIGHT }}>
             <CardContent>
-              <Typography variant="subtitle2" fontWeight={600} mb={1}>
-                Detalle del predio
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="subtitle2" fontWeight={600}>
+                  Detalle del predio
+                </Typography>
+                <Tooltip title="Ver detalles del predio">
+                  <span>
+                    <IconButton
+                      size="small"
+                      color="primary"
+                      disabled={!predioActivo.id_operacion}
+                      onClick={() => setModalDetalles({ open: true, idOperacion: predioActivo.id_operacion })}
+                    >
+                      <VisibilityIcon fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              </Box>
               <Divider sx={{ mb: 1.5 }} />
               <Stack spacing={1.5}>
                 {[
@@ -1212,6 +1253,33 @@ export default function AsignacionDetalle() {
         proyectoId={id}
         idOperacion={modalFotos.idOperacion}
       />
+
+      {/* Visor de detalles del predio (PredioVisor en modal) */}
+      <Dialog
+        open={modalDetalles.open}
+        onClose={() => setModalDetalles({ open: false, idOperacion: null })}
+        maxWidth="lg"
+        fullWidth
+        scroll="paper"
+      >
+        <DialogTitle>Detalles del predio</DialogTitle>
+        <DialogContent dividers sx={{ p: 0 }}>
+          {modalDetalles.idOperacion && (
+            <Box sx={{ p: 2 }}>
+              <PredioVisor
+                formConfig={predioCompletoLectura}
+                busqueda={modalDetalles.idOperacion}
+                modoOverride="view"
+              />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setModalDetalles({ open: false, idOperacion: null })}>
+            Cerrar
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Modal para aplicar paquete offline editado a PostGIS */}
       <ModalAplicarPaqueteOffline

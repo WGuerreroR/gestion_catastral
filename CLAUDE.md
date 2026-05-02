@@ -109,6 +109,68 @@ Endpoints QField Cloud (en `routers/asignacion_proyecto.py`):
 - Frontend uses OpenLayers for map rendering; `shpjs` for client-side shapefile parsing
 - Spatial API routes (`/spatial/*`) support polygon and manzana/block code searches
 
+## Visor de predios (parametrizable por JSON)
+
+Componente React reutilizable que renderiza la información completa de
+un predio (predio + terreno + N unidades + características + fotos +
+interesados) dirigido 100% por un JSON. La página `/predios/visor`
+busca por `id_operacion` o `numero_predial` y monta `<PredioVisor>`.
+
+### Backend
+- `routers/predios.py` expone:
+  - `GET /predios/{busqueda}/completo` — payload jerárquico del predio
+  - `GET /dominios/{nombre_tabla}` — catálogos LADM (`*tipo`) con whitelist
+    + caché TTL 1h (`routers/dominios.py`)
+  - `GET /spatial/manzana/{codigo_manzana}` — geometría de la manzana
+  - `GET /predios/{id}/fotos/{ruta}` — sirve fotos del proyecto activo
+    del predio (resuelto vía `predio_fotos_service`)
+  - `GET /predios/{id}/auditoria/{tabla}/{pk}` — stub `cambios: []`
+  - `POST /predios/{id}/guardar` — UPSERT por tabla; valida permisos +
+    whitelist + reglas server-side contra el form JSON
+  - `GET /predios/{id}/export-pdf` — PDF con `fpdf2` (texto + fotos)
+- `services/predio_form_loader.py` carga form JSONs desde
+  `api/v1/app/forms/`. Los JSONs **deben mantenerse sincronizados** con
+  los del frontend (`webapp/src/config/predio-forms/`) — esto se hace
+  manualmente con `cp` o un test que compare ambos archivos.
+- `services/predio_validators.py` espejo Python de los validadores del
+  frontend (mismas reglas, mismo orden).
+
+### Frontend (`webapp/src/components/predio-visor/`)
+- `PredioVisor.jsx` — orquestador. Se invoca como
+  `<PredioVisor formConfig={...} busqueda="ch-16318" />`.
+- `widgets/` — registry: `text`, `textarea`, `number`, `boolean`,
+  `date`, `datetime`, `select`, `photo`, `geometry`. Para agregar un
+  widget nuevo, crearlo en `widgets/` y registrarlo en `widgets/index.js`.
+- `mapa/SeccionMapa.jsx` — sección tipo `mapa` multi-capa con
+  OpenLayers + proj4 (EPSG:9377). Sync bidireccional con secciones
+  `lista` vía `useMapaPredioSync`.
+- `validators.js` y `visibility.js` — reglas declaradas en JSON.
+  `registrarValidador(nombre, fn)` para validators custom.
+
+### Cómo agregar un nuevo form JSON
+1. Crear `webapp/src/config/predio-forms/<nombre>.json` (referencia:
+   `predio-completo-lectura.json`).
+2. Copiar el archivo a `api/v1/app/forms/<nombre>.json` (los dos lados
+   deben coincidir bit a bit).
+3. Importarlo desde la página y pasarlo como `formConfig` al
+   `<PredioVisor>`.
+4. Cada `seccion` requiere `tipo` (`registro_unico` | `lista` | `mapa`),
+   `tabla_origen`, `id_pk_field` (para auditoría y guardado), y
+   opcionalmente `roles_edicion` (sin esto, la sección queda solo en
+   view aunque el modo global sea edit).
+5. Para cada `campo` declarar `widget`, `field`, `label` y
+   opcionalmente `validations`, `visible_if`, `auditoria.habilitada`.
+
+### Tablas LADM editables desde el visor
+`predio_guardar_repo.py` define los UPDATERS:
+- **registro_unico**: `lc_predio_p`, `cr_terreno`
+- **lista**: `cr_unidadconstruccion`, `cr_caracteristicasunidadconstruccion`,
+  `cr_interesado`
+
+Los campos editables vienen del whitelist del JSON. PKs (`id_operacion`,
+`globalid`, `id_operacion_uc_geo`, etc.) son inmutables y solo
+identifican el registro.
+
 ## Key Conventions
 
 - **Repository pattern:** All DB queries live in `repositories/`; routers call services or repositories directly, never raw SQL.

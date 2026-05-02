@@ -12,6 +12,7 @@ import Perfil         from './pages/Perfil'
 import CalidadExterna        from './pages/CalidadExterna'
 import CalidadExternaCrear   from './pages/CalidadExternaCrear'
 import CalidadExternaDetalle from './pages/CalidadExternaDetalle'
+import PredioVisorPage       from './pages/PredioVisorPage'
 import ProtectedRoute from './components/ProtectedRoute'
 import Sidebar, { SIDEBAR_WIDTH, SIDEBAR_WIDTH_CLOSED } from './components/Sidebar'
 import Navbar         from './components/Navbar'
@@ -68,6 +69,7 @@ export default function App() {
         <Route path="/roles"        element={<Layout><Roles /></Layout>} />
         <Route path="/asignaciones" element={<Layout><Asignaciones /></Layout>} />
         <Route path="/asignaciones/:id" element={<Layout><AsignacionDetalle /></Layout>} />
+        <Route path="/predios/visor"    element={<Layout><PredioVisorPage /></Layout>} />
         <Route path="/perfil"       element={<Layout><Perfil /></Layout>} />
       </Route>
       <Route path="*" element={<Navigate to={user ? '/dashboard' : '/login'} />} />

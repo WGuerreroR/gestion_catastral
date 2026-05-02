@@ -51,3 +51,25 @@ def buscar_manzanas(
     if len(texto) < 6:
         raise HTTPException(status_code=400, detail="Mínimo 6 caracteres")
     return spatial_repo.buscar_manzanas(db, texto)
+
+
+@router.get("/manzana/{codigo_manzana}")
+def get_manzana(
+    codigo_manzana: str,
+    db: Session = Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    """
+    Devuelve solo la geometría de una manzana (sin la lista de predios
+    que sí trae `/buscar-por-manzana/`). Pensado como capa de contexto
+    en el visor de predios.
+    """
+    manzana = spatial_repo.get_manzana_geojson(db, codigo_manzana)
+    if not manzana:
+        raise HTTPException(status_code=404, detail="Manzana no encontrada")
+
+    return {
+        "codigo_manzana": manzana["codigo"],
+        "geometry": manzana["geom"],
+        "srid": 4326,
+    }

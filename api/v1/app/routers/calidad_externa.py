@@ -140,6 +140,19 @@ def rerandomizar(
     return {"ok": True, "mensaje": "Muestra rerandomizada exitosamente"}
 
 
+@router.delete("/{pc_id}")
+def eliminar_proyecto(
+    pc_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    try:
+        calidad_externa_repo.eliminar_proyecto(db, pc_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"ok": True, "mensaje": "Proyecto de calidad externa eliminado"}
+
+
 @router.get("/{pc_id}/predios")
 def predios_proyecto(
     pc_id: int,

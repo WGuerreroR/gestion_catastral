@@ -11,10 +11,12 @@ import TravelExploreIcon from '@mui/icons-material/TravelExplore'
 import ShuffleIcon       from '@mui/icons-material/Shuffle'
 import TableChartIcon    from '@mui/icons-material/TableChart'
 import MapIcon           from '@mui/icons-material/Map'
+import DeleteIcon        from '@mui/icons-material/Delete'
 import { useParams, useNavigate } from 'react-router-dom'
 import api from '../api/axios'
 import MapaCalidad, { COLORES } from '../components/MapaCalidad'
 import useRerandomizar from '../hooks/useRerandomizar'
+import { getErrorMessage } from '../utils/errorHandler'
 
 export default function CalidadExternaDetalle() {
   const { id }   = useParams()
@@ -29,6 +31,8 @@ export default function CalidadExternaDetalle() {
   const [error,        setError]        = useState('')
   const [success,      setSuccess]      = useState('')
   const [predioActivo, setPredioActivo] = useState(null)
+  const [confirmarEliminar, setConfirmarEliminar] = useState(false)
+  const [eliminando,   setEliminando]   = useState(false)
 
   const mostrarSuccess = (msg) => { setSuccess(msg); setTimeout(() => setSuccess(''), 4000) }
   const mostrarError   = (msg) => { setError(msg);   setTimeout(() => setError(''),   4000) }
@@ -57,6 +61,18 @@ export default function CalidadExternaDetalle() {
       .then(({ data }) => setGeojson(data))
       .catch(() => {})
   }, [tab, id, geojson])
+
+  const handleEliminar = async () => {
+    setEliminando(true)
+    try {
+      await api.delete(`/calidad-externa/${id}`)
+      navigate('/calidad-externa')
+    } catch (e) {
+      mostrarError(getErrorMessage(e, 'Error al eliminar el proyecto'))
+      setEliminando(false)
+      setConfirmarEliminar(false)
+    }
+  }
 
   const { confirmar, dialogProps } = useRerandomizar({
     tipo: 'externa',
@@ -127,6 +143,13 @@ export default function CalidadExternaDetalle() {
           onClick={confirmar}
         >
           Re-randomizar muestra
+        </Button>
+        <Button
+          variant="outlined" color="error"
+          startIcon={<DeleteIcon />}
+          onClick={() => setConfirmarEliminar(true)}
+        >
+          Eliminar
         </Button>
       </Box>
 
@@ -279,6 +302,39 @@ export default function CalidadExternaDetalle() {
             }
           >
             {dialogProps.cargando ? 'Procesando...' : 'Re-randomizar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Dialog eliminar */}
+      <Dialog
+        open={confirmarEliminar}
+        onClose={() => !eliminando && setConfirmarEliminar(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Eliminar proyecto de calidad externa</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            ¿Seguro que deseas eliminar el proyecto{' '}
+            <strong>{proyecto?.nombre}</strong>? Esta acción no se puede deshacer
+            y se eliminarán también el universo y la muestra asociados.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setConfirmarEliminar(false)} disabled={eliminando}>
+            Cancelar
+          </Button>
+          <Button
+            variant="contained" color="error"
+            onClick={handleEliminar}
+            disabled={eliminando}
+            startIcon={eliminando
+              ? <CircularProgress size={16} color="inherit" />
+              : <DeleteIcon />
+            }
+          >
+            {eliminando ? 'Eliminando...' : 'Eliminar'}
           </Button>
         </DialogActions>
       </Dialog>

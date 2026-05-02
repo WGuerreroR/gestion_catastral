@@ -9,3 +9,5 @@ api/v1/app/services/__pycache__/*
 api/v1/app/utils/__pycache__/*
 .DS_Store
 .DS_Store
+tests/__init__.py
+tests/__pycache__/*

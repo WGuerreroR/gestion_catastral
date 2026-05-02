@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
-from routers import auth, personas, roles, asignaciones, predios, asignacion_proyecto, spatial, calidad, calidad_externa
+from routers import auth, personas, roles, asignaciones, predios, asignacion_proyecto, spatial, calidad, calidad_externa, dominios
 
 
 @asynccontextmanager
@@ -47,6 +47,7 @@ app.include_router(asignacion_proyecto.router, prefix="/api/v1")
 app.include_router(spatial.router,             prefix="/api/v1")
 app.include_router(calidad.router,             prefix="/api/v1")
 app.include_router(calidad_externa.router,     prefix="/api/v1")
+app.include_router(dominios.router,            prefix="/api/v1")
 
 router = APIRouter()
 

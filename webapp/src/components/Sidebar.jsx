@@ -11,6 +11,7 @@ import AssignmentIcon    from '@mui/icons-material/Assignment'
 import FactCheckIcon        from '@mui/icons-material/FactCheck' 
 import TravelExploreIcon from '@mui/icons-material/TravelExplore'
 import MapIcon           from '@mui/icons-material/Map'
+import HomeWorkIcon      from '@mui/icons-material/HomeWork'
 import ChevronLeftIcon   from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon  from '@mui/icons-material/ChevronRight'
 import Menu  from '@mui/icons-material/Menu'
@@ -47,6 +48,12 @@ const menuItems = [
       path:  '/validacion',
       icon:  <FactCheckIcon />,
       roles: ['administrador']
+    },
+    {
+      label: 'Visor de predios',
+      path:  '/predios/visor',
+      icon:  <HomeWorkIcon />,
+      roles: ['administrador', 'gerente', 'lider', 'ejecutor', 'supervisor']
     },
     {
       label: 'Calidad Externa',

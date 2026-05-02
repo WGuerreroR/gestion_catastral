@@ -198,6 +198,29 @@ def crear_proyecto_externa(db: Session, nombre: str, descripcion: str,
     return {"id": pc_id, "total_predios": total_predios, "muestra_calculada": muestra_calculada}
 
 
+# ── Eliminar proyecto ─────────────────────────────────────────────────────────
+
+def eliminar_proyecto(db: Session, pc_id: int):
+    row = db.execute(text("""
+        SELECT id FROM admin_proyecto_calidad
+        WHERE id = :id AND tipo = 'externa'
+    """), {"id": pc_id}).fetchone()
+    if not row:
+        raise ValueError(f"Proyecto de calidad externa {pc_id} no encontrado")
+
+    db.execute(text("""
+        DELETE FROM admin_proyecto_calidad_muestra WHERE proyecto_calidad_id = :id
+    """), {"id": pc_id})
+    db.execute(text("""
+        DELETE FROM admin_proyecto_calidad_predio WHERE proyecto_calidad_id = :id
+    """), {"id": pc_id})
+    db.execute(text("""
+        DELETE FROM admin_proyecto_calidad WHERE id = :id AND tipo = 'externa'
+    """), {"id": pc_id})
+
+    db.commit()
+
+
 # ── Rerandomizar ──────────────────────────────────────────────────────────────
 
 def rerandomizar(db: Session, pc_id: int):
