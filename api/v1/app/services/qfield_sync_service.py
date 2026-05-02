@@ -392,6 +392,66 @@ def tarea_aplicar_paquete(sync_id: int) -> None:
                     f"{len(predios_tocados)} predio(s) marcados como sincronizados"
                 )
 
+            # Auto-asignar predios nuevos a la asignación.
+            # Si el operador creó un predio en campo (`lc_predio_p` con
+            # id_operacion nuevo), también lo registramos en
+            # admin_persona_predio con el responsable de la asignación,
+            # así aparece en la tabla de predios para validar.
+            res_predio = resumenes_obj.get("lc_predio_p")
+            if res_predio and res_predio.added_pks:
+                # Filtrar PKs reales (no ids locales __nuevo_*)
+                ids_nuevos = [
+                    p for p in res_predio.added_pks
+                    if not (isinstance(p, str) and p.startswith("__nuevo_fid_"))
+                ]
+                responsable_id = asignacion.get("responsable_id")
+                if ids_nuevos and responsable_id:
+                    r = db.execute(text("""
+                        INSERT INTO admin_persona_predio
+                            (persona_id, id_operacion, proyecto_id,
+                             tipo_asignacion, estado, asignado_por)
+                        SELECT :rid, x.id_op, :pid,
+                               'espacial', 'campo', :rid
+                        FROM unnest(CAST(:ids AS text[])) AS x(id_op)
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM admin_persona_predio
+                            WHERE id_operacion = x.id_op
+                              AND proyecto_id = :pid
+                        )
+                    """), {
+                        "rid": responsable_id,
+                        "pid": asignacion_id,
+                        "ids": ids_nuevos,
+                    })
+                    if r.rowcount and r.rowcount > 0:
+                        advertencias.append(
+                            f"{r.rowcount} predio(s) nuevo(s) asignado(s) "
+                            f"automáticamente al responsable de la asignación"
+                        )
+                elif ids_nuevos:
+                    advertencias.append(
+                        f"{len(ids_nuevos)} predio(s) nuevo(s) NO se asignaron "
+                        f"(la asignación no tiene responsable)"
+                    )
+
+            # Marcar admin_persona_predio.estado='sincronizado' para los
+            # predios efectivamente tocados en esta asignación. La guardia
+            # IN ('campo','sincronizado') evita pisar 'validacion'/'completado'
+            # cuando llega un re-sync sobre predios que ya avanzaron en el flujo.
+            if predios_tocados:
+                r_app = db.execute(text("""
+                    UPDATE admin_persona_predio
+                       SET estado = 'sincronizado',
+                           fecha_actualizacion = NOW()
+                     WHERE proyecto_id = :pid
+                       AND id_operacion = ANY(:ids)
+                       AND estado IN ('campo', 'sincronizado')
+                """), {"pid": asignacion_id, "ids": list(predios_tocados)})
+                if r_app.rowcount and r_app.rowcount > 0:
+                    advertencias.append(
+                        f"{r_app.rowcount} predio(s) marcados como 'sincronizado' en la asignación"
+                    )
+
             db.commit()
 
         # 5. Persistir el ZIP como paquete oficial de la asignación.

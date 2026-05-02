@@ -214,7 +214,7 @@ def asignar_predios(db: Session, proyecto_id: int, persona_id: int,
                      tipo_asignacion, estado, proyecto_id)
                 VALUES
                     (:persona_id, :asignado_por, :id_op,
-                     :tipo, 'pendiente', :proyecto_id)
+                     :tipo, 'campo', :proyecto_id)
             """), {
                 "persona_id":   persona_id,
                 "asignado_por": asignado_por,

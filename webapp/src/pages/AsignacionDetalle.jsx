@@ -50,16 +50,18 @@ import predioCompletoLectura       from '../config/predio-forms/predio-completo-
 const MAP_HEIGHT = 550
 
 const coloresEstado = {
-  campo:      { fill: 'rgba(255,0,200,0.4)',  stroke: '#F57C00' },
-  validado:   { fill: 'rgba(33,150,243,0.4)', stroke: '#1565C0' },
-  finalizado: { fill: 'rgba(76,175,80,0.4)',  stroke: '#2E7D32' },
-  sin_asignar:{ fill: 'rgba(255,152,0,0.4)',  stroke: '#F57C00' }
+  campo:        { fill: 'rgba(255,0,200,0.4)',  stroke: '#F57C00' },
+  sincronizado: { fill: 'rgba(139,195,74,0.4)', stroke: '#558B2F' },
+  validado:     { fill: 'rgba(33,150,243,0.4)', stroke: '#1565C0' },
+  finalizado:   { fill: 'rgba(76,175,80,0.4)',  stroke: '#2E7D32' },
+  sin_asignar:  { fill: 'rgba(255,152,0,0.4)',  stroke: '#F57C00' }
 }
 
 const chipEstado = {
-  campo:      'warning',
-  validado:   'info',
-  finalizado: 'success',
+  campo:        'warning',
+  sincronizado: 'success',
+  validado:     'info',
+  finalizado:   'success',
 }
 
 const colorEstadoSync = {
@@ -614,9 +616,9 @@ export default function AsignacionDetalle() {
 
   // ── Columnas tabla ───────────────────────────────────────
   const columnas = [
+    { field: 'id_operacion',  headerName: 'ID Operación',    width: 160 },
     { field: 'npn',           headerName: 'NPN',             width: 200 },
     { field: 'nombre_predio', headerName: 'Identificación',  width: 200 },
-    { field: 'municipio',     headerName: 'Municipio',       width: 140 },
     { field: 'responsable',   headerName: 'Responsable',     width: 180 },
     {
       field: 'estado', headerName: 'Estado', width: 120,
