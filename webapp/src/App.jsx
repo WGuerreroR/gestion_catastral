@@ -12,6 +12,9 @@ import Perfil         from './pages/Perfil'
 import CalidadExterna        from './pages/CalidadExterna'
 import CalidadExternaCrear   from './pages/CalidadExternaCrear'
 import CalidadExternaDetalle from './pages/CalidadExternaDetalle'
+import CalidadAsignaciones        from './pages/CalidadAsignaciones'
+import CalidadAsignacionesCrear   from './pages/CalidadAsignacionesCrear'
+import CalidadAsignacionesDetalle from './pages/CalidadAsignacionesDetalle'
 import PredioVisorPage       from './pages/PredioVisorPage'
 import ProtectedRoute from './components/ProtectedRoute'
 import Sidebar, { SIDEBAR_WIDTH, SIDEBAR_WIDTH_CLOSED } from './components/Sidebar'
@@ -66,6 +69,9 @@ export default function App() {
         <Route path="/calidad-externa"          element={<Layout><CalidadExterna /></Layout>} />
         <Route path="/calidad-externa/crear"    element={<Layout><CalidadExternaCrear /></Layout>} />
         <Route path="/calidad-externa/:id"      element={<Layout><CalidadExternaDetalle /></Layout>} />
+        <Route path="/calidad-asignaciones"        element={<Layout><CalidadAsignaciones /></Layout>} />
+        <Route path="/calidad-asignaciones/crear"  element={<Layout><CalidadAsignacionesCrear /></Layout>} />
+        <Route path="/calidad-asignaciones/:id"    element={<Layout><CalidadAsignacionesDetalle /></Layout>} />
         <Route path="/roles"        element={<Layout><Roles /></Layout>} />
         <Route path="/asignaciones" element={<Layout><Asignaciones /></Layout>} />
         <Route path="/asignaciones/:id" element={<Layout><AsignacionDetalle /></Layout>} />

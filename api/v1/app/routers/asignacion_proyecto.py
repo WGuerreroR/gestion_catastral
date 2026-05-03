@@ -233,6 +233,29 @@ def cambiar_estado_predio(
     asignacion_proyecto_repo.actualizar_estado_predio(db, asignacion_id, proyecto_id, data.estado)
     return {"mensaje": f"Estado actualizado a '{data.estado}'"}
 
+
+@router.put("/{proyecto_id}/estado")
+def cambiar_estado_proyecto(
+    proyecto_id: int,
+    data: CambioEstadoPredio,  # reusamos el mismo body {estado: str}
+    db: Session = Depends(get_db),
+    user=Depends(require_roles("administrador", "supervisor"))
+):
+    """
+    Cambia admin_asignacion.estado. Si pasa a 'validacion', sella
+    fecha_entrada_validacion (necesaria para el muestreo de calidad).
+    Estados válidos: campo, sincronizado, validacion, finalizado.
+    """
+    if not asignacion_proyecto_repo.get_by_id(db, proyecto_id):
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    try:
+        asignacion_proyecto_repo.actualizar_estado_asignacion(
+            db, proyecto_id, data.estado
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"mensaje": f"Estado del proyecto actualizado a '{data.estado}'"}
+
 @router.delete("/{proyecto_id}/area")
 def limpiar_area(
     proyecto_id: int,

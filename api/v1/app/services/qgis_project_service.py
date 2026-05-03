@@ -519,3 +519,230 @@ class QgisProjectService:
                     arcname = os.path.relpath(fpath, self.output_dir)
                     zf.write(fpath, arcname)
         return zip_path
+
+    # ── Soporte para inyección de capas / filtros (calidad por asignación) ───
+
+    @staticmethod
+    def _parsear_db_url(db_url: str):
+        """Devuelve (user, pwd, host, port, dbname) a partir del DATABASE_URL."""
+        import re
+        m = re.match(
+            r"postgresql(?:\+\w+)?://([^:]+):([^@]+)@([^:/]+):?(\d+)?/(.+)",
+            db_url,
+        )
+        if not m:
+            raise ValueError(f"No se pudo parsear DATABASE_URL: {db_url}")
+        user, pwd, host, port, dbname = m.groups()
+        return user, pwd, host, port or "5432", dbname
+
+    def _extraer_qgs(self):
+        """
+        Extrae el .qgs del .qgz y devuelve (qgs_path, tmp_dir). El caller debe
+        invocar self._reempaquetar_qgz(qgs_path, tmp_dir) cuando termine.
+        """
+        import tempfile
+        tmp_dir = tempfile.mkdtemp(prefix=f"{self.clave_proyecto}_qgs_")
+        with zipfile.ZipFile(self.qgz_path, "r") as zf:
+            zf.extractall(tmp_dir)
+        qgs_files = glob.glob(os.path.join(tmp_dir, "*.qgs"))
+        if not qgs_files:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise FileNotFoundError("No se encontró .qgs dentro del .qgz")
+        return qgs_files[0], tmp_dir
+
+    def _reempaquetar_qgz(self, qgs_path: str, tmp_dir: str):
+        """Re-comprime el contenido de tmp_dir como .qgz reemplazando self.qgz_path."""
+        nuevo_qgz = self.qgz_path
+        with zipfile.ZipFile(nuevo_qgz, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root_dir, _, files in os.walk(tmp_dir):
+                for fname in files:
+                    fpath   = os.path.join(root_dir, fname)
+                    arcname = os.path.relpath(fpath, tmp_dir)
+                    zf.write(fpath, arcname)
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    @staticmethod
+    def _clausula_filtro_para(nombre_tabla: str, quoted_universo: str) -> str | None:
+        """
+        Devuelve la cláusula SQL (subset string de QGIS) para filtrar la capa
+        al universo de predios del proyecto, o None si la tabla no está
+        mapeada. quoted_universo: lista de id_operacion ya escapados, separados
+        por coma.
+
+        Match flexible: ignora schema, mayúsculas, comillas y guiones bajos.
+
+        Cadena de relaciones (verificada en BD):
+          lc_predio_p.id_operacion (universo)
+            ← cr_terreno.id_operacion_predio
+            ← cr_caracteristicasunidadconstruccion.id_operacion_predio
+                 → cr_caracteristicasunidadconstruccion.id_operacion_unidad_cons
+                   ← cr_unidadconstruccion.id_operacion_unidad_const
+        """
+        if not nombre_tabla:
+            return None
+        norm = (
+            nombre_tabla.split(".")[-1]
+            .strip('"')
+            .lower()
+            .replace("_", "")
+        )
+        # Predio
+        if "lcprediop" in norm or norm == "predio" or norm.startswith("predio"):
+            return f"id_operacion IN ({quoted_universo})"
+        # Terreno
+        if "terreno" in norm:
+            return f"id_operacion_predio IN ({quoted_universo})"
+        # Características de unidad de construcción (puente)
+        if "caracteristicas" in norm:
+            return f"id_operacion_predio IN ({quoted_universo})"
+        # Unidad de construcción: subquery vía la tabla puente
+        # cr_caracteristicasunidadconstruccion (que sí tiene id_operacion_predio).
+        # Atención a los nombres: 'unidad_const' en cr_unidadconstruccion vs
+        # 'unidad_cons' en la tabla puente (verificado en information_schema).
+        if "unidad" in norm and "constr" in norm:
+            return (
+                "id_operacion_unidad_const IN ("
+                "SELECT id_operacion_unidad_cons "
+                "FROM cr_caracteristicasunidadconstruccion "
+                f"WHERE id_operacion_predio IN ({quoted_universo})"
+                ")"
+            )
+        return None
+
+    def aplicar_capas_calidad(
+        self,
+        predios_universo: list[str],
+        muestra_por_asignacion: dict[str, list[str]] | None = None,
+        db_url: str | None = None,
+    ):
+        """
+        En una sola pasada de QgsProject:
+          1. Filtra las capas catastrales (lc_predio_p, cr_terreno,
+             cr_unidadconstruccion, cr_caracteristicasunidadconstruccion)
+             al universo de predios del proyecto.
+          2. Agrega una capa nueva 'Predios muestra' que apunta a cr_terreno
+             (geometría real del terreno) filtrando por id_operacion_predio.
+             Símbolo único naranja semi-transparente con borde rojo + label
+             id_operacion_predio.
+
+        Una sola lectura/escritura del .qgs evita problemas de persistencia
+        del singleton QgsProject entre llamadas.
+        """
+        if not predios_universo and not muestra_por_asignacion:
+            return
+
+        from qgis.core import (
+            QgsSingleSymbolRenderer, QgsFillSymbol,
+            QgsPalLayerSettings, QgsTextFormat, QgsVectorLayerSimpleLabeling,
+        )
+
+        db_url = db_url or os.environ.get("DATABASE_URL", "")
+        user, pwd, host, port, dbname = self._parsear_db_url(db_url)
+
+        qgs_path, tmp_dir = self._extraer_qgs()
+        try:
+            project = QgsProject.instance()
+            project.clear()
+            project.read(qgs_path)
+
+            # 1. Subset SQL para capas catastrales del universo
+            if predios_universo:
+                quoted_universo = ",".join(
+                    "'" + i.replace("'", "''") + "'" for i in predios_universo
+                )
+                aplicadas = []
+                inspeccionadas = []
+                for layer in list(project.mapLayers().values()):
+                    if not isinstance(layer, QgsVectorLayer):
+                        continue
+                    prov = layer.providerType()
+                    nombre = layer.name()
+                    if prov != "postgres":
+                        inspeccionadas.append(f"{nombre!r} prov={prov!r} (skip)")
+                        continue
+                    uri = QgsDataSourceUri(layer.dataProvider().dataSourceUri())
+                    schema = uri.schema()
+                    tabla  = uri.table()
+                    clausula = self._clausula_filtro_para(tabla, quoted_universo)
+                    inspeccionadas.append(
+                        f"{nombre!r} schema={schema!r} tabla={tabla!r} "
+                        f"match={'sí' if clausula else 'no'}"
+                    )
+                    if not clausula:
+                        continue
+                    actual = layer.subsetString()
+                    nuevo  = f"({actual}) AND ({clausula})" if actual else clausula
+                    layer.setSubsetString(nuevo)
+                    aplicadas.append(tabla)
+                # Logs visibles en `docker compose logs api_v1`
+                print(
+                    f"[calidad-qgis] capas postgres inspeccionadas:\n  - "
+                    + "\n  - ".join(inspeccionadas),
+                    flush=True,
+                )
+                print(f"[calidad-qgis] subset aplicado a: {aplicadas}", flush=True)
+
+            # 2. Capa de predios muestra (apunta a cr_terreno → geometría real)
+            if muestra_por_asignacion:
+                todos = sorted({
+                    p for ids in muestra_por_asignacion.values() for p in ids
+                })
+                if todos:
+                    quoted_muestra = ",".join(
+                        "'" + i.replace("'", "''") + "'" for i in todos
+                    )
+
+                    # Capa directa sobre cr_terreno con subset por
+                    # id_operacion_predio. Geometría real del terreno catastral.
+                    uri = QgsDataSourceUri()
+                    uri.setConnection(host, port, dbname, user, pwd)
+                    uri.setDataSource(
+                        "public", "cr_terreno", "geometry",
+                        f"id_operacion_predio IN ({quoted_muestra})",
+                        "globalid",
+                    )
+
+                    layer = QgsVectorLayer(uri.uri(False), "Predios muestra", "postgres")
+                    if not layer.isValid():
+                        err = (layer.dataProvider().error().message()
+                               if layer.dataProvider() else "?")
+                        raise RuntimeError(f"capa Predios muestra inválida: {err}")
+
+                    # Símbolo único: relleno naranja semi-transparente +
+                    # borde rojo grueso, claramente distinguible.
+                    sym = QgsFillSymbol.createSimple({
+                        "color":         "255,145,0,140",   # #FF9100 alpha 55%
+                        "outline_color": "200,40,0,255",
+                        "outline_width": "0.8",
+                    })
+                    layer.setRenderer(QgsSingleSymbolRenderer(sym))
+
+                    # Etiqueta con id_operacion_predio (id del predio asociado)
+                    pal = QgsPalLayerSettings()
+                    pal.fieldName = "id_operacion_predio"
+                    pal.enabled   = True
+                    txt = QgsTextFormat()
+                    txt.setSize(8)
+                    pal.setFormat(txt)
+                    layer.setLabeling(QgsVectorLayerSimpleLabeling(pal))
+                    layer.setLabelsEnabled(True)
+
+                    # Agregar al proyecto + insertar al tope del árbol
+                    project.addMapLayer(layer, addToLegend=False)
+                    root = project.layerTreeRoot()
+                    nodo = root.insertLayer(0, layer)
+                    if nodo is not None:
+                        nodo.setItemVisibilityChecked(True)
+
+                    print(
+                        f"[calidad-qgis] capa 'Predios muestra' creada con "
+                        f"{len(todos)} predios (fuente: cr_terreno)",
+                        flush=True,
+                    )
+
+            project.write(qgs_path)
+            project.clear()
+            self._reempaquetar_qgz(qgs_path, tmp_dir)
+        except Exception:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise

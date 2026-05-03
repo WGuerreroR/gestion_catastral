@@ -56,6 +56,12 @@ ALTER TABLE admin_asignacion
   ADD COLUMN IF NOT EXISTS qfield_cloud_project_id VARCHAR(255) NULL;
 ```
 
+Para activar el muestreo de calidad por asignación, aplicar también:
+```bash
+psql "$DATABASE_URL" -f migrations/007_calidad_muestreo_asignacion.sql
+psql "$DATABASE_URL" -f migrations/008_drop_admin_proyecto_calidad_asignacion.sql
+```
+
 ## QField Offline & QField Cloud
 
 `generar_paquete_proyecto` (en `qgis_export_service.py`) orquesta el flujo completo:
@@ -108,6 +114,78 @@ Endpoints QField Cloud (en `routers/asignacion_proyecto.py`):
 - Geospatial exports land in `data/qgis/exports/`
 - Frontend uses OpenLayers for map rendering; `shpjs` for client-side shapefile parsing
 - Spatial API routes (`/spatial/*`) support polygon and manzana/block code searches
+
+## Muestreo de calidad por asignación
+
+Flujo paralelo a `/calidad-externa` (que sigue activo e intacto). UX espejo
+del viejo: listado de proyectos + crear (panel izquierdo + mapa) + detalle
+con tabs (predios / mapa / asignaciones) + re-randomizar + eliminar.
+La diferencia es que el universo se construye **eligiendo asignaciones en
+estado `validacion`** en lugar de polígono / manzana / barrio / shapefile.
+
+Tablas (creadas por `migrations/007_calidad_muestreo_asignacion.sql`):
+- `admin_proyecto_calidad_muestreo` — cabecera (nombre, descripción, estado,
+  total_predios, muestra_calculada, area_geom = ST_Union de las áreas de las
+  asignaciones).
+- `admin_proyecto_calidad_muestreo_asignacion` — N:N proyecto ↔ asignación.
+- `admin_proyecto_calidad_muestreo_predio` — universo de predios con flag
+  `en_muestra` (mismo patrón que el viejo, pero unificado en una tabla).
+
+Columna nueva en `admin_asignacion`: `fecha_entrada_validacion`. Se sella en
+`repositories/asignacion_proyecto_repo.actualizar_estado_asignacion()` cada
+vez que un proyecto pasa al estado `validacion` (vía `PUT /proyectos/{id}/estado`).
+La columna existe por consistencia semántica; el muestreo no filtra por ella.
+
+Cálculo de muestra: `utils/calidad.calcular_muestra(N, margen_error,
+nivel_confianza)`. El usuario elige el margen de error al crear el proyecto
+(5/10/15%, default 10%); IC fijo en 95% pero se persiste igual. Los dos
+parámetros usados quedan en `admin_proyecto_calidad_muestreo`
+(columnas `margen_error`, `nivel_confianza` — migración 009). El flujo
+viejo `/calidad-externa` sigue usando `calcular_muestra_minima` (Z=1.96,
+e=5%) sin cambios.
+
+Endpoints (en `routers/calidad_muestreo.py`, prefijo `/calidad-muestreo`):
+- `GET /asignaciones-disponibles` — todas las asignaciones en `estado='validacion'`.
+- `POST /preview` — body `{asignacion_ids}`. Devuelve `{total_predios,
+  muestra_calculada, id_operaciones, geojson_predios, area_geojson}`.
+- `POST /` — crea proyecto (admin/supervisor).
+- `GET /` y `GET /{id}` — listado y detalle.
+- `GET /{id}/predios`, `GET /{id}/asignaciones`, `GET /{id}/geojson`.
+- `POST /{id}/rerandomizar` — admin/supervisor.
+- `DELETE /{id}` — admin/supervisor.
+
+UI: `/calidad-asignaciones` (listado), `/calidad-asignaciones/crear` (panel
+con lista checkable de asignaciones + mapa con preview en vivo),
+`/calidad-asignaciones/:id` (detalle con tabs Predios / Mapa / Asignaciones).
+Reusa `<MapaCalidad>` y `useRerandomizar({ tipo: 'muestreo', ... })`.
+
+**Flujo de cierre (validación predio×proyecto y propagación de calidad_campo)**
+— migración `migrations/011_calidad_muestreo_validacion_predio.sql`:
+- Cada fila de `admin_proyecto_calidad_muestreo_predio` tiene `validado`
+  (boolean), `fecha_validacion`, `validado_por`. Solo los que están en muestra
+  pueden marcarse.
+- Endpoint `PATCH /calidad-muestreo/{id}/predios/{id_operacion}/validacion`
+  con body `{validado: bool}` (admin/supervisor). En la UI, tab "Predios"
+  trae checkbox "Validar" por fila.
+- El detalle muestra una card "Validados X / N (faltan M)".
+- Cuando todos los predios muestra están validados, el botón "Cerrar
+  proyecto" se habilita en el header. `POST /calidad-muestreo/{id}/cerrar`:
+  · `UPDATE lc_predio_p SET calidad_campo = 1` para todos los predios del
+    universo (no solo muestra).
+  · `UPDATE admin_proyecto_calidad_muestreo SET estado='cerrado',
+    fecha_cierre=NOW(), cerrado_por=:user`.
+  · No toca `admin_asignacion.estado` ni `admin_persona_predio.estado` —
+    el cierre es solo de calidad.
+- Tras el cierre, los checkboxes de validar y los botones de re-randomizar
+  quedan deshabilitados (proyecto en modo solo lectura).
+
+Tests: `tests/test_muestreo_calidad.py` cubre `calcular_muestra_minima`.
+
+**Nota futura — fuera de scope**: la validación predio-a-predio se hará
+en un proyecto offline (QField) que lea estas tablas y permita aprobar
+cada predio muestra desde el campo. Cuando todos los predios muestra de
+una asignación queden aprobados, propagar `lc_predio_p.calidad_campo=true`
+al resto de los predios de esa asignación. Aún no implementado.
 
 ## Visor de predios (parametrizable por JSON)
 

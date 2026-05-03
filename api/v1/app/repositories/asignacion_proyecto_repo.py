@@ -410,3 +410,36 @@ def get_area_wkt_9377(db, proyecto_id: int) -> str | None:
         WHERE id = :id AND area_geom IS NOT NULL
     """), {"id": proyecto_id}).fetchone()
     return row.wkt if row else None
+
+
+_ESTADOS_ASIGNACION = ("campo", "sincronizado", "validacion", "finalizado")
+
+
+def actualizar_estado_asignacion(db, asignacion_id: int, nuevo_estado: str):
+    """
+    Cambia admin_asignacion.estado y mantiene los timestamps coherentes.
+    Cuando el nuevo estado es 'validacion' también sella fecha_entrada_validacion
+    (snapshot del momento en que la asignación quedó disponible para muestreo
+    de calidad). Si vuelve a 'validacion' después de un rechazo, la fecha se
+    actualiza para que el filtro por período la incluya.
+    """
+    if nuevo_estado not in _ESTADOS_ASIGNACION:
+        raise ValueError(
+            f"estado inválido: {nuevo_estado}. Válidos: {_ESTADOS_ASIGNACION}"
+        )
+    if nuevo_estado == "validacion":
+        db.execute(text("""
+            UPDATE admin_asignacion
+               SET estado = :estado,
+                   fecha_entrada_validacion = NOW(),
+                   fecha_actualizacion = NOW()
+             WHERE id = :id
+        """), {"estado": nuevo_estado, "id": asignacion_id})
+    else:
+        db.execute(text("""
+            UPDATE admin_asignacion
+               SET estado = :estado,
+                   fecha_actualizacion = NOW()
+             WHERE id = :id
+        """), {"estado": nuevo_estado, "id": asignacion_id})
+    db.commit()

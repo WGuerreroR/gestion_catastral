@@ -178,6 +178,86 @@ def cargar_proyecto_offline(db, proyecto_id: int, contenido_zip: bytes) -> dict:
 
 # ── Función principal ─────────────────────────────────────────────────────────
 
+def generar_paquete_calidad_muestreo(
+    db, pc_id: int, clave: str,
+) -> bytes:
+    """
+    Genera el .zip con un proyecto QGIS para un proyecto de calidad por
+    asignación. Como generar_paquete_proyecto_2 pero:
+      - area_geom se lee de admin_proyecto_calidad_muestreo (ST_Union de
+        las áreas de las asignaciones).
+      - Se filtran las capas catastrales (lc_predio_p, cr_terreno,
+        cr_unidadconstruccion) al universo de predios del proyecto.
+      - Se inyecta una capa nueva 'Predios muestra' con los en_muestra=true
+        coloreados en naranja semi-transparente y etiqueta id_operacion.
+    """
+    row = db.execute(text("""
+        SELECT ST_AsText(area_geom) AS wkt
+          FROM admin_proyecto_calidad_muestreo
+         WHERE id = :id AND area_geom IS NOT NULL
+    """), {"id": pc_id}).fetchone()
+    if not row or not row.wkt:
+        raise ValueError("El proyecto no tiene área geométrica definida")
+    wkt_9377 = row.wkt
+
+    # Universo del proyecto
+    universo = [
+        r.id_operacion for r in db.execute(text("""
+            SELECT id_operacion
+              FROM admin_proyecto_calidad_muestreo_predio
+             WHERE proyecto_id = :id
+        """), {"id": pc_id}).fetchall()
+    ]
+
+    # Predios muestra agrupados por lote = clave_proyecto de la asignación
+    # de origen (admin_persona_predio.proyecto_id → admin_asignacion).
+    rows_muestra = db.execute(text("""
+        SELECT mcp.id_operacion,
+               COALESCE(a.clave_proyecto, 'Sin asignación') AS lote
+          FROM admin_proyecto_calidad_muestreo_predio mcp
+          LEFT JOIN admin_persona_predio app
+                 ON app.id_operacion = mcp.id_operacion
+          LEFT JOIN admin_proyecto_calidad_muestreo_asignacion mca
+                 ON mca.proyecto_id = mcp.proyecto_id
+                AND mca.asignacion_id = app.proyecto_id
+          LEFT JOIN admin_asignacion a
+                 ON a.id = mca.asignacion_id
+         WHERE mcp.proyecto_id = :id
+           AND mcp.en_muestra  = TRUE
+    """), {"id": pc_id}).fetchall()
+
+    muestra_por_lote: dict[str, list[str]] = {}
+    for r in rows_muestra:
+        muestra_por_lote.setdefault(r.lote, []).append(r.id_operacion)
+
+    with tempfile.TemporaryDirectory() as workdir:
+        qgis_svc = QgisProjectService(
+            clave_proyecto=clave, output_base_dir=workdir,
+        )
+        qgis_svc.copiar_proyecto_base()
+
+        shp_path = qgis_svc.get_shp_path()
+        shp_svc  = ShapefileService(shp_path)
+        shp_svc.reemplazar_geometria(
+            wkt_9377=wkt_9377,
+            atributos={"nombre": clave, "id": pc_id},
+        )
+
+        xmin, ymin, xmax, ymax = shp_svc.get_extent(wkt_9377)
+        qgis_svc.actualizar_extent(xmin, ymin, xmax, ymax)
+
+        # Filtrar catastrales al universo + capa destacada de muestra (lotes
+        # por asignación). Una sola pasada de QgsProject.
+        qgis_svc.aplicar_capas_calidad(
+            predios_universo=universo,
+            muestra_por_asignacion=muestra_por_lote,
+        )
+
+        zip_path = qgis_svc.comprimir(workdir)
+        with open(zip_path, "rb") as f:
+            return f.read()
+
+
 def generar_paquete_proyecto_2(db, proyecto_id: int, clave_proyecto: str) -> bytes:
     """
     1. Lee area_geom (WKT EPSG:9377) desde PostGIS

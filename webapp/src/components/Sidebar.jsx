@@ -61,6 +61,12 @@ const menuItems = [
       icon:  <TravelExploreIcon />,
       roles: ['administrador']
     },
+    {
+      label: 'Calidad por asignación',
+      path:  '/calidad-asignaciones',
+      icon:  <FactCheckIcon />,
+      roles: ['administrador', 'supervisor']
+    },
 
     {
       label: 'Dashboard',
