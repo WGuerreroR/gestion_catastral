@@ -73,6 +73,15 @@ class CerrarProyectoResponse(BaseModel):
     fecha_cierre: datetime
 
 
+class ReabrirProyectoRequest(BaseModel):
+    motivo: str
+
+
+class ReabrirProyectoResponse(BaseModel):
+    predios_revertidos: int
+    estado: str = "activo"
+
+
 class ProyectoResumen(BaseModel):
     id: int
     nombre: str
@@ -86,6 +95,9 @@ class ProyectoResumen(BaseModel):
     fecha_actualizacion: datetime
     fecha_cierre: Optional[datetime] = None
     cerrado_por: Optional[int] = None
+    fecha_reapertura: Optional[datetime] = None
+    reabierto_por: Optional[int] = None
+    motivo_reapertura: Optional[str] = None
     creado_por: Optional[int] = None
     creado_por_nombre: Optional[str] = None
     asignaciones_count: int = 0

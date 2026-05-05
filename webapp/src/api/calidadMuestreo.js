@@ -45,6 +45,9 @@ export const calidadMuestreoApi = {
   cerrar: (id) =>
     api.post(`${BASE}/${id}/cerrar`).then(r => r.data),
 
+  reabrir: (id, motivo) =>
+    api.post(`${BASE}/${id}/reabrir`, { motivo }).then(r => r.data),
+
   descargarQgis: (id) =>
     api.get(`${BASE}/${id}/descargar-qgis`, { responseType: 'blob' }),
 }

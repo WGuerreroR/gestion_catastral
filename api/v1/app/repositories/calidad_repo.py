@@ -5,7 +5,11 @@ import json
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-def get_by_numero_predial(db: Session, numero_predial: str):
+def get_by_numero_predial(db: Session, busqueda: str):
+    """
+    Busca un predio por numero_predial o id_operacion (lo que matchee primero).
+    El nombre del parámetro 'busqueda' permite cualquiera de los dos formatos.
+    """
     resultado = db.execute(text("""
         SELECT
             p.id_operacion,
@@ -37,9 +41,9 @@ def get_by_numero_predial(db: Session, numero_predial: str):
             ST_AsGeoJSON(ST_Transform(t.geometry, 4326)) AS geom_geojson
         FROM lc_predio_p p
         LEFT JOIN cr_terreno t ON t.npn = p.numero_predial
-        WHERE p.numero_predial = :numero_predial
+        WHERE p.numero_predial = :q OR p.id_operacion = :q
         LIMIT 1
-    """), {"numero_predial": numero_predial}).fetchone()
+    """), {"q": busqueda}).fetchone()
  
     if not resultado:
         return None

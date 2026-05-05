@@ -16,8 +16,10 @@ import DoneAllIcon    from '@mui/icons-material/DoneAll'
 import DownloadIcon   from '@mui/icons-material/Download'
 import EditIcon       from '@mui/icons-material/Edit'
 import LockIcon       from '@mui/icons-material/Lock'
+import LockOpenIcon   from '@mui/icons-material/LockOpen'
 import AssignmentIcon from '@mui/icons-material/Assignment'
 import { useNavigate, useParams } from 'react-router-dom'
+import { useSelector } from 'react-redux'
 import api from '../api/axios'
 import MapaCalidad, { COLORES } from '../components/MapaCalidad'
 import { getErrorMessage } from '../utils/errorHandler'
@@ -59,6 +61,12 @@ export default function CalidadAsignacionesDetalle() {
   const [editDescripcion, setEditDescripcion] = useState('')
   const [guardando,   setGuardando]   = useState(false)
   const [descargandoQgis, setDescargandoQgis] = useState(false)
+  const [reabrirOpen,    setReabrirOpen]    = useState(false)
+  const [reabrirMotivo,  setReabrirMotivo]  = useState('')
+  const [reabriendo,     setReabriendo]     = useState(false)
+
+  const usuarioRoles = useSelector((s) => s.auth?.user?.roles ?? [])
+  const esAdmin = usuarioRoles.includes('administrador') || usuarioRoles.includes('admin')
 
   const mostrarSuccess = (msg) => { setSuccess(msg); setTimeout(() => setSuccess(''), 4000) }
   const mostrarError   = (msg) => { setError(msg);   setTimeout(() => setError(''),   4000) }
@@ -129,6 +137,27 @@ export default function CalidadAsignacionesDetalle() {
     }
   }
 
+  const abrirReabrir = () => {
+    setReabrirMotivo('')
+    setReabrirOpen(true)
+  }
+  const ejecutarReabrir = async () => {
+    if (!reabrirMotivo.trim()) return
+    setReabriendo(true)
+    try {
+      await api.post(`/calidad-muestreo/${id}/reabrir`,
+        { motivo: reabrirMotivo.trim() })
+      setReabrirOpen(false)
+      mostrarSuccess('Proyecto reabierto. calidad_campo revertido en el universo.')
+      setGeojson(null)
+      cargar()
+    } catch (e) {
+      mostrarError(getErrorMessage(e, 'Error al reabrir el proyecto'))
+    } finally {
+      setReabriendo(false)
+    }
+  }
+
   const descargarQgis = async () => {
     setDescargandoQgis(true)
     try {
@@ -155,12 +184,27 @@ export default function CalidadAsignacionesDetalle() {
   const togglearValidado = async (predio) => {
     if (proyecto?.estado === 'cerrado') return
     setValidandoId(predio.id_operacion)
+    const nuevoValor = !predio.validado
     try {
-      await api.patch(
+      const { data } = await api.patch(
         `/calidad-muestreo/${id}/predios/${encodeURIComponent(predio.id_operacion)}/validacion`,
-        { validado: !predio.validado },
+        { validado: nuevoValor },
       )
-      cargar()
+      // Actualizar solo la fila tocada — sin recargar la grid entera.
+      setPredios((prev) => prev.map((p) =>
+        p.id_operacion === predio.id_operacion
+          ? {
+              ...p,
+              validado: nuevoValor,
+              fecha_validacion: nuevoValor ? new Date().toISOString() : null,
+            }
+          : p
+      ))
+      // Refrescar contador en el proyecto (para card y botón "Cerrar").
+      setProyecto((prev) => prev
+        ? { ...prev, validados_count: data?.validados ?? prev.validados_count }
+        : prev
+      )
     } catch (e) {
       mostrarError(getErrorMessage(e, 'Error al marcar el predio'))
     } finally {
@@ -284,6 +328,14 @@ export default function CalidadAsignacionesDetalle() {
               size="small"
               color={proyecto?.estado === 'activo' ? 'success' : 'default'}
             />
+            {proyecto?.fecha_reapertura && (
+              <Tooltip title={proyecto?.motivo_reapertura
+                ? `Motivo: ${proyecto.motivo_reapertura}`
+                : 'Proyecto reabierto'}>
+                <Chip size="small" color="warning" variant="outlined"
+                  icon={<LockOpenIcon />} label="Reabierto" />
+              </Tooltip>
+            )}
             {proyecto?.margen_error != null && (
               <Chip
                 size="small" variant="outlined"
@@ -326,22 +378,31 @@ export default function CalidadAsignacionesDetalle() {
             </Tooltip>
           )
         })()}
-        <Tooltip title={!proyecto?.area_geojson
-          ? 'El proyecto no tiene área (sin asignaciones con geometría)'
-          : 'Descargar proyecto QGIS (.zip)'}>
-          <span>
-            <Button
-              variant="outlined"
-              startIcon={descargandoQgis
-                ? <CircularProgress size={16} />
-                : <DownloadIcon />}
-              onClick={descargarQgis}
-              disabled={descargandoQgis || !proyecto?.area_geojson}
-            >
-              {descargandoQgis ? 'Generando…' : 'Descargar QGIS'}
-            </Button>
-          </span>
-        </Tooltip>
+        {(() => {
+          const cerrado = proyecto?.estado === 'cerrado'
+          const sinArea = !proyecto?.area_geojson
+          const tooltip = cerrado
+            ? 'Proyecto cerrado: no se puede descargar el QGIS'
+            : sinArea
+              ? 'El proyecto no tiene área (sin asignaciones con geometría)'
+              : 'Descargar proyecto QGIS (.zip)'
+          return (
+            <Tooltip title={tooltip}>
+              <span>
+                <Button
+                  variant="outlined"
+                  startIcon={descargandoQgis
+                    ? <CircularProgress size={16} />
+                    : <DownloadIcon />}
+                  onClick={descargarQgis}
+                  disabled={descargandoQgis || sinArea || cerrado}
+                >
+                  {descargandoQgis ? 'Generando…' : 'Descargar QGIS'}
+                </Button>
+              </span>
+            </Tooltip>
+          )
+        })()}
         <Button
           variant="contained" color="success"
           startIcon={<DoneAllIcon />}
@@ -353,6 +414,19 @@ export default function CalidadAsignacionesDetalle() {
         >
           Cerrar proyecto
         </Button>
+        {proyecto?.estado === 'cerrado' && esAdmin && (
+          <Tooltip title="Reabrir proyecto (revierte calidad_campo)">
+            <span>
+              <Button
+                variant="outlined" color="warning"
+                startIcon={<LockOpenIcon />}
+                onClick={abrirReabrir}
+              >
+                Reabrir
+              </Button>
+            </span>
+          </Tooltip>
+        )}
         <Button
           variant="outlined" color="error"
           startIcon={<DeleteIcon />}
@@ -627,6 +701,48 @@ export default function CalidadAsignacionesDetalle() {
               : <EditIcon />}
           >
             {guardando ? 'Guardando…' : 'Guardar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Dialog reabrir */}
+      <Dialog
+        open={reabrirOpen}
+        onClose={() => !reabriendo && setReabrirOpen(false)}
+        maxWidth="sm" fullWidth
+      >
+        <DialogTitle>Reabrir proyecto cerrado</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Alert severity="warning">
+              Esta acción revertirá <strong>calidad_campo = 0</strong> en
+              los <strong>{proyecto?.total_predios ?? 0}</strong> predios
+              del universo, y volverá el proyecto a estado <strong>activo</strong>.
+              Las marcas <em>validado</em> de los predios muestra se conservan.
+            </Alert>
+            <TextField
+              autoFocus fullWidth size="small" required multiline rows={3}
+              label="Motivo de la reapertura"
+              value={reabrirMotivo}
+              onChange={(e) => setReabrirMotivo(e.target.value)}
+              disabled={reabriendo}
+              helperText="Queda registrado para auditoría"
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setReabrirOpen(false)} disabled={reabriendo}>
+            Cancelar
+          </Button>
+          <Button
+            variant="contained" color="warning"
+            onClick={ejecutarReabrir}
+            disabled={reabriendo || !reabrirMotivo.trim()}
+            startIcon={reabriendo
+              ? <CircularProgress size={16} color="inherit" />
+              : <LockOpenIcon />}
+          >
+            {reabriendo ? 'Reabriendo…' : 'Confirmar reapertura'}
           </Button>
         </DialogActions>
       </Dialog>

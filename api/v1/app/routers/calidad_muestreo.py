@@ -22,6 +22,8 @@ from schemas.calidad_muestreo import (
     CrearProyectoRequest,
     MarcarValidadoRequest,
     MarcarValidadoResponse,
+    ReabrirProyectoRequest,
+    ReabrirProyectoResponse,
     PredioDeProyecto,
     PreviewRequest,
     PreviewResponse,
@@ -248,6 +250,30 @@ def descargar_qgis(
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{clave}.zip"'},
     )
+
+
+@router.post("/{pc_id}/reabrir", response_model=ReabrirProyectoResponse)
+def reabrir_proyecto(
+    pc_id: int,
+    body: ReabrirProyectoRequest,
+    db: Session = Depends(get_db),
+    user=Depends(require_roles("administrador")),
+):
+    """
+    Reabre un proyecto cerrado: revierte calidad_campo=0 en todos los
+    predios del universo y vuelve estado a 'activo'. Solo administrador.
+    Conserva las marcas validado=true en los predios muestra.
+    """
+    if not body.motivo or not body.motivo.strip():
+        raise HTTPException(400, "El motivo es obligatorio")
+    try:
+        out = calidad_muestreo_repo.reabrir_proyecto(
+            db, pc_id, body.motivo.strip(),
+            int(user.get("sub") or 0) or None,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return out
 
 
 @router.post("/{pc_id}/cerrar", response_model=CerrarProyectoResponse)

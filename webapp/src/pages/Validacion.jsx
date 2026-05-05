@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import {
   Box, Typography, TextField, Button, Alert, CircularProgress,
   Card, CardContent, Chip, Divider, Grid, Stack, IconButton,
-  Tooltip, InputAdornment, Paper
+  Tooltip, InputAdornment, Paper, Dialog, AppBar, Toolbar
 } from '@mui/material'
 import SearchIcon       from '@mui/icons-material/Search'
 import CheckCircleIcon  from '@mui/icons-material/CheckCircle'
@@ -17,6 +17,9 @@ import CloseIcon        from '@mui/icons-material/Close'
 import VerifiedIcon     from '@mui/icons-material/Verified'
 import NewReleasesIcon  from '@mui/icons-material/NewReleases'
 import LocationOnIcon   from '@mui/icons-material/LocationOn'
+import VisibilityIcon   from '@mui/icons-material/Visibility'
+import PredioVisor      from '../components/predio-visor/PredioVisor'
+import predioLectura    from '../config/predio-forms/predio-completo-lectura.json'
 import OlMap        from 'ol/Map'
 import View         from 'ol/View'
 import TileLayer    from 'ol/layer/Tile'
@@ -236,6 +239,7 @@ export default function CalidadPredio() {
   const [success,      setSuccess]      = useState('')
   const [actualizando, setActualizando] = useState(null)
   const [guardandoObs, setGuardandoObs] = useState(null)
+  const [verCompletoOpen, setVerCompletoOpen] = useState(false)
 
   const mostrarError   = (msg) => { setError(msg);   setTimeout(() => setError(''),   4000) }
   const mostrarSuccess = (msg) => { setSuccess(msg); setTimeout(() => setSuccess(''), 4000) }
@@ -302,21 +306,32 @@ export default function CalidadPredio() {
   return (
     <Box sx={{ p: 3 }}>
 
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-        <Typography variant="h5" fontWeight={600}>Control de calidad predial</Typography>
-        {predio && <IndicadorValidacion total={totalAprobados} />}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1, gap: 2, flexWrap: 'wrap' }}>
+        <Typography variant="h5" fontWeight={600}>Estado del predio</Typography>
+        <Stack direction="row" spacing={1.5} alignItems="center">
+          {predio && (
+            <Button
+              variant="outlined" size="small"
+              startIcon={<VisibilityIcon />}
+              onClick={() => setVerCompletoOpen(true)}
+            >
+              Ver información completa
+            </Button>
+          )}
+          {predio && <IndicadorValidacion total={totalAprobados} />}
+        </Stack>
       </Box>
       <Typography variant="body2" color="text.secondary" mb={3}>
-        Ingresa el número predial para verificar y aprobar los aspectos de calidad.
+        Ingresa el número predial o el id de operación para verificar y aprobar los aspectos de calidad.
       </Typography>
 
       {/* Buscador */}
       <Box sx={{ display: 'flex', gap: 1, mb: 3, maxWidth: 520 }}>
-        <TextField fullWidth size="small" label="Número predial"
+        <TextField fullWidth size="small" label="Número predial o ID de operación"
           value={busqueda}
           onChange={e => setBusqueda(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleBuscar()}
-          placeholder="Ej: 25001000100000000001000"
+          placeholder="Ej: 25001000100000000001000  ó  ch-16318"
           InputProps={{ startAdornment: (
             <InputAdornment position="start">
               <SearchIcon fontSize="small" color="action" />
@@ -417,6 +432,33 @@ export default function CalidadPredio() {
 
         </Grid>
       )}
+
+      {/* Dialog full-screen — información completa del predio (solo lectura) */}
+      <Dialog
+        open={verCompletoOpen}
+        onClose={() => setVerCompletoOpen(false)}
+        fullScreen
+      >
+        <AppBar position="sticky" color="default" elevation={1}>
+          <Toolbar>
+            <Typography variant="h6" sx={{ flexGrow: 1 }}>
+              Información completa del predio (solo lectura)
+            </Typography>
+            <IconButton onClick={() => setVerCompletoOpen(false)}>
+              <CloseIcon />
+            </IconButton>
+          </Toolbar>
+        </AppBar>
+        <Box sx={{ p: 2 }}>
+          {predio && verCompletoOpen && (
+            <PredioVisor
+              formConfig={predioLectura}
+              busqueda={predio.id_operacion}
+              modoOverride="view"
+            />
+          )}
+        </Box>
+      </Dialog>
     </Box>
   )
 }

@@ -280,7 +280,8 @@ def get_lista(db: Session) -> list[dict]:
                m.total_predios, m.muestra_calculada,
                m.margen_error, m.nivel_confianza,
                m.fecha_creacion, m.fecha_actualizacion,
-               m.fecha_cierre,
+               m.fecha_cierre, m.cerrado_por,
+               m.fecha_reapertura, m.reabierto_por, m.motivo_reapertura,
                m.creado_por,
                p.primer_nombre || ' ' || p.primer_apellido AS creado_por_nombre,
                COUNT(DISTINCT mca.id) AS asignaciones_count,
@@ -306,6 +307,7 @@ def get_by_id(db: Session, pc_id: int) -> Optional[dict]:
                m.margen_error, m.nivel_confianza,
                m.fecha_creacion, m.fecha_actualizacion,
                m.fecha_cierre, m.cerrado_por,
+               m.fecha_reapertura, m.reabierto_por, m.motivo_reapertura,
                m.creado_por,
                p.primer_nombre || ' ' || p.primer_apellido AS creado_por_nombre,
                (SELECT COUNT(*) FROM admin_proyecto_calidad_muestreo_asignacion
@@ -389,6 +391,51 @@ def actualizar_proyecto(db: Session, pc_id: int, campos: dict) -> None:
          WHERE id = :id
     """), params)
     db.commit()
+
+
+def reabrir_proyecto(
+    db: Session, pc_id: int, motivo: str, reabierto_por: Optional[int],
+) -> dict:
+    """
+    Reabre un proyecto cerrado: revierte calidad_campo=0 en todos los
+    predios del universo, vuelve estado a 'activo' y persiste auditoría.
+    Conserva las marcas validado=true en los predios muestra.
+    """
+    cab = db.execute(text("""
+        SELECT estado FROM admin_proyecto_calidad_muestreo WHERE id = :id
+    """), {"id": pc_id}).fetchone()
+    if not cab:
+        raise ValueError(f"Proyecto de muestreo {pc_id} no encontrado")
+    if cab.estado != "cerrado":
+        raise ValueError("Solo se puede reabrir un proyecto cerrado")
+
+    # 1. Revertir calidad_campo a 0 para todos los predios del universo
+    res = db.execute(text("""
+        UPDATE lc_predio_p
+           SET calidad_campo    = 0,
+               last_edited_date = NOW()
+         WHERE id_operacion IN (
+             SELECT id_operacion
+               FROM admin_proyecto_calidad_muestreo_predio
+              WHERE proyecto_id = :pc
+         )
+    """), {"pc": pc_id})
+    predios_revertidos = res.rowcount or 0
+
+    # 2. Volver el proyecto a 'activo' + auditoría
+    db.execute(text("""
+        UPDATE admin_proyecto_calidad_muestreo
+           SET estado              = 'activo',
+               fecha_cierre        = NULL,
+               cerrado_por         = NULL,
+               fecha_reapertura    = NOW(),
+               reabierto_por       = :user,
+               motivo_reapertura   = :motivo,
+               fecha_actualizacion = NOW()
+         WHERE id = :pc
+    """), {"user": reabierto_por, "motivo": motivo, "pc": pc_id})
+    db.commit()
+    return {"predios_revertidos": predios_revertidos, "estado": "activo"}
 
 
 def marcar_predio_validado(
