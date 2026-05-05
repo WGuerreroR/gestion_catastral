@@ -122,7 +122,7 @@ export default function AsignacionDetalle() {
   const { id }     = useParams()
   const navigate   = useNavigate()
   const { user }   = useSelector(state => state.auth)
-  const puedeAdmin = user?.roles?.some(r => ['administrador', 'supervisor'].includes(r))
+  const puedeAdmin = user?.roles?.some(r => ['administrador', 'supervisor', 'coordinador'].includes(r))
 
   const mapRef          = useRef(null)
   const mapInstance     = useRef(null)
@@ -729,15 +729,17 @@ export default function AsignacionDetalle() {
 
           {/* Fila 1: Descargar área + Asignar predios (último) */}
           <Stack direction="row" spacing={1}>
-            <Button
-              variant="outlined"
-              color="secondary"
-              startIcon={descargandoQGZ ? <CircularProgress size={16} /> : <MapIcon />}
-              onClick={handleDescargarQGZ}
-              disabled={descargandoQGZ || procesandoCloud}
-            >
-              {descargandoQGZ ? 'Descargando...' : 'Descargar área'}
-            </Button>
+            {puedeAdmin && (
+              <Button
+                variant="outlined"
+                color="secondary"
+                startIcon={descargandoQGZ ? <CircularProgress size={16} /> : <MapIcon />}
+                onClick={handleDescargarQGZ}
+                disabled={descargandoQGZ || procesandoCloud}
+              >
+                {descargandoQGZ ? 'Descargando...' : 'Descargar área'}
+              </Button>
+            )}
             {puedeAdmin && (
               <Tooltip
                 title={

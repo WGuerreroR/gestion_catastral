@@ -2,7 +2,7 @@ from fastapi import Depends, HTTPException, status, Header
 from typing import Optional
 from core.security import decode_token
 
-SKIP_AUTH = True
+SKIP_AUTH = False
 
 def get_current_user(authorization: Optional[str] = Header(None)):
     if SKIP_AUTH:
@@ -38,3 +38,16 @@ def require_roles(*roles_permitidos):
             )
         return user
     return verificar
+
+
+ROLES_ADMIN_PROYECTO = {"administrador", "supervisor", "coordinador"}
+
+
+def es_admin_proyecto(user: dict) -> bool:
+    return any(r in ROLES_ADMIN_PROYECTO for r in user.get("roles", []))
+
+
+def filtro_responsable(user: dict) -> Optional[int]:
+    if es_admin_proyecto(user):
+        return None
+    return int(user["sub"])

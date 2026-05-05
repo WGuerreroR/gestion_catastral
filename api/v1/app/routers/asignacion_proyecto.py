@@ -4,7 +4,10 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from db.database import get_db
-from core.deps import get_current_user, require_roles
+from core.deps import (
+    get_current_user, require_roles,
+    es_admin_proyecto, filtro_responsable, ROLES_ADMIN_PROYECTO,
+)
 from core.security import verify_password
 from fastapi import BackgroundTasks
 from services.qgis_export_service import (
@@ -61,14 +64,25 @@ os.makedirs(EXPORTS_DIR, exist_ok=True)
  
 def _zip_path(clave: str) -> str:
     return os.path.join(EXPORTS_DIR, f"{clave}.zip")
- 
+
+
+def _assert_acceso_proyecto(db: Session, proyecto_id: int, user: dict) -> dict:
+    proyecto = asignacion_proyecto_repo.get_by_id(db, proyecto_id)
+    if not proyecto:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    if not es_admin_proyecto(user) and proyecto.get("responsable_id") != int(user["sub"]):
+        raise HTTPException(status_code=403, detail="No tiene acceso a este proyecto")
+    return proyecto
+
 
 @router.get("/", response_model=List[AsignacionProyectoResponse])
 def listar_proyectos(
     db: Session = Depends(get_db),
     user=Depends(get_current_user)
 ):
-    return asignacion_proyecto_repo.get_all(db)
+    return asignacion_proyecto_repo.get_all(
+        db, responsable_id=filtro_responsable(user)
+    )
 
 @router.get("/{proyecto_id}", response_model=AsignacionProyectoResponse)
 def obtener_proyecto(
@@ -76,10 +90,7 @@ def obtener_proyecto(
     db: Session = Depends(get_db),
     user=Depends(get_current_user)
 ):
-    proyecto = asignacion_proyecto_repo.get_by_id(db, proyecto_id)
-    if not proyecto:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
-    return proyecto
+    return _assert_acceso_proyecto(db, proyecto_id, user)
 
 @router.get("/{proyecto_id}/predios")
 def predios_del_proyecto(
@@ -87,6 +98,7 @@ def predios_del_proyecto(
     db: Session = Depends(get_db),
     user=Depends(get_current_user)
 ):
+    _assert_acceso_proyecto(db, proyecto_id, user)
     return asignacion_proyecto_repo.get_predios(db, proyecto_id)
 
 @router.get("/{proyecto_id}/geojson")
@@ -95,6 +107,7 @@ def geojson_proyecto(
     db: Session = Depends(get_db),
     user=Depends(get_current_user)
 ):
+    _assert_acceso_proyecto(db, proyecto_id, user)
     return asignacion_proyecto_repo.get_geojson(db, proyecto_id)
 
 @router.post("/", status_code=201)
@@ -288,6 +301,7 @@ def get_area_proyecto(
     current_user = Depends(get_current_user)
 ):
     """Devuelve el área del proyecto como GeoJSON Feature"""
+    _assert_acceso_proyecto(db, proyecto_id, current_user)
     area = asignacion_proyecto_repo.get_area_geojson(db, proyecto_id)
     if not area:
         raise HTTPException(status_code=404, detail="El proyecto no tiene área definida")
@@ -308,9 +322,7 @@ def descargar_proyecto_por_id(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
-    proyecto = asignacion_proyecto_repo.get_by_id(db, id)
-    if not proyecto:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    proyecto = _assert_acceso_proyecto(db, id, current_user)
 
     clave_proyecto = proyecto['clave_proyecto']
     zip_path = _zip_path(clave_proyecto)
@@ -341,6 +353,7 @@ def descargar_proyecto_por_clave(
     ref = asignacion_proyecto_repo.get_by_clave(db, clave_proyecto)
     if not ref:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    _assert_acceso_proyecto(db, ref.id, current_user)
 
     zip_path = _zip_path(clave_proyecto)
 
@@ -401,7 +414,21 @@ def descargar_proyecto_qfield(
     Cualquier usuario activo puede descargar (Basic Auth o ?token=<jwt>).
     Usa cache si existe, genera si no.
     """
-    _autenticar_qfield(db, credentials, token)
+    auth = _autenticar_qfield(db, credentials, token)
+
+    ref = asignacion_proyecto_repo.get_by_clave(db, clave_proyecto)
+    if not ref:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+
+    proyecto = asignacion_proyecto_repo.get_by_id(db, ref.id)
+    persona_id = (
+        int(auth["sub"]) if isinstance(auth, dict) and "sub" in auth
+        else getattr(auth, "id", None)
+    )
+    roles_auth = auth.get("roles", []) if isinstance(auth, dict) else []
+    es_admin = any(r in ROLES_ADMIN_PROYECTO for r in roles_auth)
+    if not es_admin and persona_id != proyecto.get("responsable_id"):
+        raise HTTPException(status_code=403, detail="No tiene acceso a este proyecto")
 
     zip_path = _zip_path(clave_proyecto)
 
@@ -411,10 +438,6 @@ def descargar_proyecto_qfield(
             media_type="application/zip",
             filename=f"{clave_proyecto}_offline.zip"
         )
-
-    ref = asignacion_proyecto_repo.get_by_clave(db, clave_proyecto)
-    if not ref:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
 
     try:
         zip_path = _generar_y_guardar(db, ref.id, clave_proyecto)
@@ -444,9 +467,7 @@ def qfield_status(
     Consulta el estado del proyecto en QField Cloud.
     Retorna 'sin_cloud' si el proyecto aún no ha sido sincronizado.
     """
-    proyecto = asignacion_proyecto_repo.get_by_id(db, proyecto_id)
-    if not proyecto:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    proyecto = _assert_acceso_proyecto(db, proyecto_id, current_user)
 
     cloud_id = asignacion_proyecto_repo.get_qfield_cloud_id(db, proyecto_id)
 
@@ -524,11 +545,20 @@ def qfield_descargar(
     Misma autenticación que /clave/{clave}/descarga/qfields (Basic Auth o ?token=<jwt>).
     Usa el zip en disco si existe; lo genera si no.
     """
-    _autenticar_qfield(db, credentials, token)
+    auth = _autenticar_qfield(db, credentials, token)
 
     proyecto = asignacion_proyecto_repo.get_by_id(db, proyecto_id)
     if not proyecto:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+
+    persona_id = (
+        int(auth["sub"]) if isinstance(auth, dict) and "sub" in auth
+        else getattr(auth, "id", None)
+    )
+    roles_auth = auth.get("roles", []) if isinstance(auth, dict) else []
+    es_admin = any(r in ROLES_ADMIN_PROYECTO for r in roles_auth)
+    if not es_admin and persona_id != proyecto.get("responsable_id"):
+        raise HTTPException(status_code=403, detail="No tiene acceso a este proyecto")
 
     clave    = proyecto["clave_proyecto"]
     zip_path = _zip_path(clave)
@@ -559,6 +589,7 @@ def estado_generacion(
     Útil para hacer polling después de confirmar-asignacion.
     Estados: sin_generar | pendiente | procesando | terminado | error
     """
+    _assert_acceso_proyecto(db, proyecto_id, _current_user)
     estado = asignacion_proyecto_repo.get_estado_generacion(db, proyecto_id)
     if not estado:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
@@ -598,9 +629,7 @@ def generar_proyecto_offline(
       404 → proyecto no encontrado
       409 → ya existe (carpeta/zip/cloud) y reemplazar=False
     """
-    proyecto = asignacion_proyecto_repo.get_by_id(db, proyecto_id)
-    if not proyecto:
-        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    proyecto = _assert_acceso_proyecto(db, proyecto_id, _user)
 
     clave = proyecto["clave_proyecto"]
     info  = recursos_offline_existen(db, proyecto_id, clave)
@@ -628,11 +657,12 @@ def descargar_proyecto_qgis(
     proyecto_id: int,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(require_roles("administrador", "supervisor", "coordinador")),
 ):
     """
     Descarga un .qgz copia del proyecto base con el canvas centrado en el
-    área del proyecto. Mantiene las conexiones PostGIS vivas (no offline).
+    área del proyecto. Mantiene las conexiones PostGIS vivas (no offline) —
+    expone credenciales de BD, por eso solo admin/supervisor/coordinador.
     """
     from fastapi.responses import FileResponse
     import shutil
@@ -670,6 +700,8 @@ async def cargar_offline(
     """
     from services.qgis_export_service import cargar_proyecto_offline
 
+    _assert_acceso_proyecto(db, proyecto_id, _user)
+
     if not archivo.filename or not archivo.filename.lower().endswith(".zip"):
         raise HTTPException(400, "El archivo debe tener extensión .zip")
 
@@ -700,7 +732,7 @@ def qfield_cloud_status(
     Estado combinado local + QField Cloud. Usado por el UI para decidir
     qué botón mostrar (Subir / Sincronizar / ninguno).
     """
-
+    _assert_acceso_proyecto(db, proyecto_id, _user)
 
     try:
         return cloud_status(db, proyecto_id)
@@ -777,6 +809,8 @@ def cancelar_operacion(
     from services.qgis_export_service import _cancelar_offline, _progreso
     from services.qfield_cloud_service import _cloud_progreso
 
+    _assert_acceso_proyecto(db, proyecto_id, _user)
+
     cancelado = []
 
     if proyecto_id in _progreso:
@@ -825,9 +859,7 @@ async def offline_inspeccionar_paquete(
       con `errores` en la respuesta (200, no 400 — el frontend prefiere
       ver el detalle).
     """
-    proyecto = asignacion_proyecto_repo.get_by_id(db, proyecto_id)
-    if not proyecto:
-        raise HTTPException(404, "Proyecto no encontrado")
+    proyecto = _assert_acceso_proyecto(db, proyecto_id, _user)
 
     if not paquete_zip.filename or not paquete_zip.filename.lower().endswith(".zip"):
         raise HTTPException(400, "El archivo debe tener extensión .zip")
@@ -900,9 +932,7 @@ def offline_historial_sync(
     ordenado por fecha desc. No incluye el detalle pesado (resumen jsonb,
     fotos_resumen, advertencias) — para eso usar /offline/sync/{id}/detalle.
     """
-    proyecto = asignacion_proyecto_repo.get_by_id(db, proyecto_id)
-    if not proyecto:
-        raise HTTPException(404, "Proyecto no encontrado")
+    _assert_acceso_proyecto(db, proyecto_id, _user)
 
     return sync_history_repo.list_by_asignacion(db, proyecto_id, limit=limit, offset=offset)
 
@@ -936,9 +966,7 @@ async def offline_aplicar_cambios(
     mismo hash y `forzar_reproceso=false`, devuelve `sync_id` con estado
     'idempotente' que copia el resumen previo (sin volver a tocar PostGIS).
     """
-    proyecto = asignacion_proyecto_repo.get_by_id(db, proyecto_id)
-    if not proyecto:
-        raise HTTPException(404, "Proyecto no encontrado")
+    proyecto = _assert_acceso_proyecto(db, proyecto_id, user)
 
     estado_actual = (proyecto.get("estado") or "").lower()
     roles = (user or {}).get("roles", [])
@@ -1013,9 +1041,7 @@ def listar_fotos_predio(
     """
     from sqlalchemy import text as _text
 
-    proyecto = asignacion_proyecto_repo.get_by_id(db, proyecto_id)
-    if not proyecto:
-        raise HTTPException(404, "Proyecto no encontrado")
+    _assert_acceso_proyecto(db, proyecto_id, _user)
 
     items = []
 
@@ -1112,9 +1138,7 @@ def offline_servir_foto(
     ):
         raise HTTPException(400, "Ruta inválida")
 
-    proyecto = asignacion_proyecto_repo.get_by_id(db, proyecto_id)
-    if not proyecto:
-        raise HTTPException(404, "Proyecto no encontrado")
+    proyecto = _assert_acceso_proyecto(db, proyecto_id, _user)
 
     clave = proyecto.get("clave_proyecto")
     if not clave:

@@ -2,8 +2,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 import json
 
-def get_all(db: Session):
-    resultado = db.execute(text("""
+def get_all(db: Session, responsable_id: int = None):
+    where = "WHERE a.responsable_id = :rid" if responsable_id is not None else ""
+    params = {"rid": responsable_id} if responsable_id is not None else {}
+    resultado = db.execute(text(f"""
         SELECT
             a.id, a.clave_proyecto, a.descripcion,
             a.estado, a.fecha_creacion, a.fecha_actualizacion,
@@ -14,9 +16,10 @@ def get_all(db: Session):
         FROM admin_asignacion a
         LEFT JOIN admin_personas p ON a.responsable_id = p.id
         LEFT JOIN admin_persona_predio ap ON a.id = ap.proyecto_id
+        {where}
         GROUP BY a.id, p.id
         ORDER BY a.fecha_creacion DESC
-    """)).fetchall()
+    """), params).fetchall()
     return [dict(r._mapping) for r in resultado]
 
 def get_by_id(db: Session, proyecto_id: int):

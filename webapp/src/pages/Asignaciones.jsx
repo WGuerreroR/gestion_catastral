@@ -40,7 +40,7 @@ const FORM_INICIAL = {
 export default function Asignaciones() {
   const { user }   = useSelector(state => state.auth)
   const navigate   = useNavigate()
-  const puedeAdmin = user?.roles?.some(r => ['administrador', 'supervisor'].includes(r))
+  const puedeAdmin = user?.roles?.some(r => ['administrador', 'supervisor', 'coordinador'].includes(r))
 
   const [proyectos,    setProyectos]    = useState([])
   const [personas,     setPersonas]     = useState([])
@@ -80,18 +80,18 @@ export default function Asignaciones() {
   const cargarDatos = useCallback(async () => {
     setLoading(true)
     try {
-      const [prRes, peRes] = await Promise.all([
-        api.get('/proyectos/'),
-        api.get('/personas/')
-      ])
+      const prRes = await api.get('/proyectos/')
       setProyectos(prRes.data)
-      setPersonas(peRes.data.filter(p => p.activo))
+      if (puedeAdmin) {
+        const peRes = await api.get('/personas/')
+        setPersonas(peRes.data.filter(p => p.activo))
+      }
     } catch {
       setError('Error cargando datos')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [puedeAdmin])
 
   useEffect(() => { cargarDatos() }, [cargarDatos])
 
@@ -476,15 +476,17 @@ export default function Asignaciones() {
                   </Button>
                 )}
 
-                <Button
-                  variant="outlined"
-                  color="secondary"
-                  startIcon={descargandoQGZ ? <CircularProgress size={16} /> : <MapIcon />}
-                  onClick={() => handleDescargarQGZ(seleccionado)}
-                  disabled={descargandoQGZ}
-                >
-                  {descargandoQGZ ? 'Descargando...' : 'Descargar área'}
-                </Button>
+                {puedeAdmin && (
+                  <Button
+                    variant="outlined"
+                    color="secondary"
+                    startIcon={descargandoQGZ ? <CircularProgress size={16} /> : <MapIcon />}
+                    onClick={() => handleDescargarQGZ(seleccionado)}
+                    disabled={descargandoQGZ}
+                  >
+                    {descargandoQGZ ? 'Descargando...' : 'Descargar área'}
+                  </Button>
+                )}
 
                 <Button
                   variant="outlined"

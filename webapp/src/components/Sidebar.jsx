@@ -30,7 +30,7 @@ const menuItems = [
     label: 'Asignaciones',
     path:  '/asignaciones',
     icon:  <AssignmentIcon />,
-    roles: ['administrador', 'gerente', 'lider', 'ejecutor']
+    roles: []
   },
     {
       label: 'Personas',
@@ -98,7 +98,7 @@ export default function Sidebar({ onToggle }) {
 
   const width = open ? SIDEBAR_WIDTH : SIDEBAR_WIDTH_CLOSED
 
-  const hasRole   = (roles) => user?.roles?.some(r => roles.includes(r))
+  const hasRole   = (roles) => !roles || roles.length === 0 || user?.roles?.some(r => roles.includes(r))
   const filtrados = menuItems.filter(item => hasRole(item.roles))
   const getIniciales = () => user?.nombre?.charAt(0).toUpperCase() || 'U'
 
