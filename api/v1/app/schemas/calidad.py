@@ -15,5 +15,5 @@ class ActualizarCalidadSchema(BaseModel):
 
 
 class ActualizarObservacionSchema(BaseModel):
-    campo: str        # revisar_campo | revisar_fisica | revisar_juridica | revisar_sig
+    campo: str        # revisar_campo | revisar_identificacion | revisar_sig | revisar_fisica | revisar_juridica | revisar_economica
     texto: Optional[str] = None

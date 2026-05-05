@@ -12,6 +12,7 @@ import FactCheckIcon        from '@mui/icons-material/FactCheck'
 import TravelExploreIcon from '@mui/icons-material/TravelExplore'
 import MapIcon           from '@mui/icons-material/Map'
 import HomeWorkIcon      from '@mui/icons-material/HomeWork'
+import LabelIcon         from '@mui/icons-material/Label'
 import ChevronLeftIcon   from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon  from '@mui/icons-material/ChevronRight'
 import Menu  from '@mui/icons-material/Menu'
@@ -44,6 +45,12 @@ const menuItems = [
       roles: ['administrador']
     },
     {
+      label: 'Tipos de marca',
+      path:  '/tipos-marca',
+      icon:  <LabelIcon />,
+      roles: ['administrador']
+    },
+    {
       label: 'Validación',
       path:  '/validacion',
       icon:  <FactCheckIcon />,
@@ -55,12 +62,12 @@ const menuItems = [
       icon:  <HomeWorkIcon />,
       roles: ['administrador', 'gerente', 'lider', 'ejecutor', 'supervisor']
     },
-    {
+   /* {
       label: 'Calidad Externa',
       path:  '/calidad-externa',
       icon:  <TravelExploreIcon />,
       roles: ['administrador']
-    },
+    },*/
     {
       label: 'Calidad por asignación',
       path:  '/calidad-asignaciones',

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Box, Typography, TextField, Button, Alert, CircularProgress,
   Card, CardContent, Chip, Divider, Grid, Stack, IconButton,
@@ -11,6 +11,8 @@ import TerrainIcon      from '@mui/icons-material/Terrain'
 import GavelIcon        from '@mui/icons-material/Gavel'
 import MapIcon          from '@mui/icons-material/Map'
 import EngineeringIcon  from '@mui/icons-material/Engineering'
+import BadgeIcon        from '@mui/icons-material/Badge'
+import AttachMoneyIcon  from '@mui/icons-material/AttachMoney'
 import EditIcon         from '@mui/icons-material/Edit'
 import SaveIcon         from '@mui/icons-material/Save'
 import CloseIcon        from '@mui/icons-material/Close'
@@ -18,8 +20,11 @@ import VerifiedIcon     from '@mui/icons-material/Verified'
 import NewReleasesIcon  from '@mui/icons-material/NewReleases'
 import LocationOnIcon   from '@mui/icons-material/LocationOn'
 import VisibilityIcon   from '@mui/icons-material/Visibility'
+import BookmarkIcon     from '@mui/icons-material/Bookmark'
 import PredioVisor      from '../components/predio-visor/PredioVisor'
 import predioLectura    from '../config/predio-forms/predio-completo-lectura.json'
+import MarcasPredio     from '../components/marcas/MarcasPredio'
+import marcasPredioApi  from '../api/marcasPredio'
 import OlMap        from 'ol/Map'
 import View         from 'ol/View'
 import TileLayer    from 'ol/layer/Tile'
@@ -35,14 +40,16 @@ import api from '../api/axios'
 const MAP_HEIGHT = 260
 
 const BLOQUES_CALIDAD = [
-  { key: 'calidad_campo',    label: 'Campo',    campoObs: 'revisar_campo',    icon: <EngineeringIcon />, color: '#F57C00' },
-  { key: 'calidad_fisica',   label: 'Física',   campoObs: 'revisar_fisica',   icon: <TerrainIcon />,     color: '#1565C0' },
-  { key: 'calidad_juridica', label: 'Jurídica', campoObs: 'revisar_juridica', icon: <GavelIcon />,       color: '#6A1B9A' },
-  { key: 'calidad_sig',      label: 'SIG',      campoObs: 'revisar_sig',      icon: <MapIcon />,         color: '#2E7D32' }
+  { key: 'calidad_campo',          label: 'Campo',          campoObs: 'revisar_campo',          icon: <EngineeringIcon />, color: '#F57C00', categoria: null },
+  { key: 'calidad_identificacion', label: 'Identificación', campoObs: 'revisar_identificacion', icon: <BadgeIcon />,       color: '#0097A7', categoria: 'IDENTIFICACION' },
+  { key: 'calidad_sig',            label: 'SIG',            campoObs: 'revisar_sig',            icon: <MapIcon />,         color: '#2E7D32', categoria: 'SIG' },
+  { key: 'calidad_fisica',         label: 'Física',         campoObs: 'revisar_fisica',         icon: <TerrainIcon />,     color: '#1565C0', categoria: 'FISICA' },
+  { key: 'calidad_juridica',       label: 'Jurídica',       campoObs: 'revisar_juridica',       icon: <GavelIcon />,       color: '#6A1B9A', categoria: 'JURIDICA' },
+  { key: 'calidad_economica',      label: 'Económica',      campoObs: 'revisar_economica',      icon: <AttachMoneyIcon />, color: '#C62828', categoria: 'ECONOMICA' },
 ]
 
 // ── Bloque de calidad ────────────────────────────────────────────────────────
-function BloqueCalidad({ bloque, predio, onActualizar, onGuardarObs, actualizando, guardandoObs }) {
+function BloqueCalidad({ bloque, predio, onActualizar, onGuardarObs, actualizando, guardandoObs, onMarcasChanged }) {
   const valor     = predio[bloque.key]
   const obsActual = predio[bloque.campoObs] || ''
   const aprobado  = valor === 1
@@ -65,7 +72,9 @@ function BloqueCalidad({ bloque, predio, onActualizar, onGuardarObs, actualizand
     <Card variant="outlined" sx={{
       borderColor: aprobado ? 'success.main' : 'divider',
       borderWidth:  aprobado ? 2 : 1,
-      transition:  'border-color 0.2s'
+      transition:  'border-color 0.2s',
+      height: '100%',
+      width:  '100%',
     }}>
       <CardContent>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
@@ -142,6 +151,14 @@ function BloqueCalidad({ bloque, predio, onActualizar, onGuardarObs, actualizand
             disabled={!aprobado || !!actualizando || editando}
           >Revertir</Button>
         </Stack>
+
+        {bloque.categoria && (
+          <MarcasPredio
+            idOperacion={predio.id_operacion}
+            categoria={bloque.categoria}
+            onMarcasChanged={onMarcasChanged}
+          />
+        )}
       </CardContent>
     </Card>
   )
@@ -149,7 +166,8 @@ function BloqueCalidad({ bloque, predio, onActualizar, onGuardarObs, actualizand
 
 // ── Indicador compacto ───────────────────────────────────────────────────────
 function IndicadorValidacion({ total }) {
-  const completo = total === 4
+  const totalBloques = BLOQUES_CALIDAD.length
+  const completo = total === totalBloques
   return (
     <Paper elevation={0} sx={{
       display: 'inline-flex', alignItems: 'center', gap: 1.5,
@@ -161,7 +179,7 @@ function IndicadorValidacion({ total }) {
     }}>
       {completo ? <VerifiedIcon sx={{ fontSize: 22 }} /> : <NewReleasesIcon sx={{ fontSize: 22 }} />}
       <Typography variant="body2" fontWeight={600}>
-        {completo ? 'Predio totalmente validado' : `${total} / 4 aspectos aprobados`}
+        {completo ? 'Predio totalmente validado' : `${total} / ${totalBloques} aspectos aprobados`}
       </Typography>
       <Stack direction="row" spacing={0.5} ml={0.5}>
         {BLOQUES_CALIDAD.map((b, i) => (
@@ -240,6 +258,27 @@ export default function CalidadPredio() {
   const [actualizando, setActualizando] = useState(null)
   const [guardandoObs, setGuardandoObs] = useState(null)
   const [verCompletoOpen, setVerCompletoOpen] = useState(false)
+  const [marcasCount, setMarcasCount] = useState({ abiertas: 0, total: 0 })
+
+  const cargarMarcasCount = useCallback(async (idOp) => {
+    if (!idOp) {
+      setMarcasCount({ abiertas: 0, total: 0 })
+      return
+    }
+    try {
+      const data = await marcasPredioApi.listar(idOp)
+      setMarcasCount({
+        abiertas: data.filter(m => m.estado === 'ABIERTA').length,
+        total:    data.length,
+      })
+    } catch {
+      setMarcasCount({ abiertas: 0, total: 0 })
+    }
+  }, [])
+
+  useEffect(() => {
+    cargarMarcasCount(predio?.id_operacion)
+  }, [predio?.id_operacion, cargarMarcasCount])
 
   const mostrarError   = (msg) => { setError(msg);   setTimeout(() => setError(''),   4000) }
   const mostrarSuccess = (msg) => { setSuccess(msg); setTimeout(() => setSuccess(''), 4000) }
@@ -317,6 +356,26 @@ export default function CalidadPredio() {
             >
               Ver información completa
             </Button>
+          )}
+          {predio && (
+            <Tooltip title={
+              marcasCount.total === 0
+                ? 'Sin marcas registradas'
+                : `${marcasCount.abiertas} abierta${marcasCount.abiertas === 1 ? '' : 's'} · ${marcasCount.total} total`
+            }>
+              <Chip
+                size="small"
+                icon={<BookmarkIcon />}
+                label={
+                  marcasCount.total === 0
+                    ? 'Sin marcas'
+                    : `${marcasCount.abiertas} / ${marcasCount.total} marcas`
+                }
+                color={marcasCount.abiertas > 0 ? 'warning' : 'default'}
+                variant={marcasCount.total === 0 ? 'outlined' : 'filled'}
+                sx={{ fontWeight: 600 }}
+              />
+            </Tooltip>
           )}
           {predio && <IndicadorValidacion total={totalAprobados} />}
         </Stack>
@@ -424,6 +483,7 @@ export default function CalidadPredio() {
                     onGuardarObs={handleGuardarObs}
                     actualizando={actualizando}
                     guardandoObs={guardandoObs}
+                    onMarcasChanged={() => cargarMarcasCount(predio.id_operacion)}
                   />
                 </Grid>
               ))}

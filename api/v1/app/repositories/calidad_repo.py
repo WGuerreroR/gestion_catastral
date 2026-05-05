@@ -31,13 +31,17 @@ def get_by_numero_predial(db: Session, busqueda: str):
             p.sector_ciudad,
             p.complemento,
             p.calidad_campo,
+            p.calidad_identificacion,
+            p.calidad_sig,
             p.calidad_fisica,
             p.calidad_juridica,
-            p.calidad_sig,
+            p.calidad_economica,
             p.revisar_campo,
+            p.revisar_identificacion,
+            p.revisar_sig,
             p.revisar_fisica,
             p.revisar_juridica,
-            p.revisar_sig,
+            p.revisar_economica,
             ST_AsGeoJSON(ST_Transform(t.geometry, 4326)) AS geom_geojson
         FROM lc_predio_p p
         LEFT JOIN cr_terreno t ON t.npn = p.numero_predial
@@ -58,7 +62,10 @@ def get_by_numero_predial(db: Session, busqueda: str):
 
 def actualizar_calidad(db: Session, id_operacion: str, campo: str, valor: int):
     """Actualiza un campo de calidad (0 = sin revisar, 1 = aprobado)"""
-    CAMPOS_PERMITIDOS = {"calidad_campo", "calidad_fisica", "calidad_juridica", "calidad_sig"}
+    CAMPOS_PERMITIDOS = {
+        "calidad_campo", "calidad_identificacion", "calidad_sig",
+        "calidad_fisica", "calidad_juridica", "calidad_economica",
+    }
     if campo not in CAMPOS_PERMITIDOS:
         raise ValueError(f"Campo no permitido: {campo}")
 
@@ -72,7 +79,10 @@ def actualizar_calidad(db: Session, id_operacion: str, campo: str, valor: int):
 
 def actualizar_observacion(db: Session, id_operacion: str, campo: str, texto: str):
     """Actualiza un campo de observación (revisar_campo, revisar_fisica, etc.)"""
-    CAMPOS_PERMITIDOS = {"revisar_campo", "revisar_fisica", "revisar_juridica", "revisar_sig"}
+    CAMPOS_PERMITIDOS = {
+        "revisar_campo", "revisar_identificacion", "revisar_sig",
+        "revisar_fisica", "revisar_juridica", "revisar_economica",
+    }
     if campo not in CAMPOS_PERMITIDOS:
         raise ValueError(f"Campo no permitido: {campo}")
 

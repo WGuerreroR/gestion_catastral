@@ -16,6 +16,7 @@ import CalidadAsignaciones        from './pages/CalidadAsignaciones'
 import CalidadAsignacionesCrear   from './pages/CalidadAsignacionesCrear'
 import CalidadAsignacionesDetalle from './pages/CalidadAsignacionesDetalle'
 import PredioVisorPage       from './pages/PredioVisorPage'
+import TiposMarca       from './pages/TiposMarca'
 import ProtectedRoute from './components/ProtectedRoute'
 import Sidebar, { SIDEBAR_WIDTH, SIDEBAR_WIDTH_CLOSED } from './components/Sidebar'
 import Navbar         from './components/Navbar'
@@ -73,6 +74,7 @@ export default function App() {
         <Route path="/calidad-asignaciones/crear"  element={<Layout><CalidadAsignacionesCrear /></Layout>} />
         <Route path="/calidad-asignaciones/:id"    element={<Layout><CalidadAsignacionesDetalle /></Layout>} />
         <Route path="/roles"        element={<Layout><Roles /></Layout>} />
+        <Route path="/tipos-marca"  element={<Layout><TiposMarca /></Layout>} />
         <Route path="/asignaciones" element={<Layout><Asignaciones /></Layout>} />
         <Route path="/asignaciones/:id" element={<Layout><AsignacionDetalle /></Layout>} />
         <Route path="/predios/visor"    element={<Layout><PredioVisorPage /></Layout>} />
