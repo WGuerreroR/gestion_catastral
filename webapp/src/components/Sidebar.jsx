@@ -13,6 +13,7 @@ import TravelExploreIcon from '@mui/icons-material/TravelExplore'
 import MapIcon           from '@mui/icons-material/Map'
 import HomeWorkIcon      from '@mui/icons-material/HomeWork'
 import LabelIcon         from '@mui/icons-material/Label'
+import FlagOutlinedIcon  from '@mui/icons-material/FlagOutlined'
 import ChevronLeftIcon   from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon  from '@mui/icons-material/ChevronRight'
 import Menu  from '@mui/icons-material/Menu'
@@ -43,6 +44,12 @@ const menuItems = [
       path:  '/roles',
       icon:  <AdminPanelIcon />,
       roles: ['administrador']
+    },
+    {
+      label: 'Marcas',
+      path:  '/marcas',
+      icon:  <FlagOutlinedIcon />,
+      roles: []
     },
     {
       label: 'Tipos de marca',

@@ -6,10 +6,22 @@ from sqlalchemy.orm import Session
 
 from db.database import get_db
 from core.deps import get_current_user
-from repositories import calidad_repo
+from repositories import calidad_repo, marca_predio_repo
 from schemas.calidad import ActualizarCalidadSchema, ActualizarObservacionSchema
 
 router = APIRouter(prefix="/calidad", tags=["Calidad"])
+
+# Mapeo de campo de calidad → categoría de marca. Aprobar (valor=1)
+# un campo con categoría asociada queda bloqueado si el predio tiene
+# marcas abiertas en esa categoría. 'calidad_campo' no entra: no
+# tiene categoría de marca.
+CAMPO_A_CATEGORIA = {
+    "calidad_identificacion": "IDENTIFICACION",
+    "calidad_sig":            "SIG",
+    "calidad_fisica":         "FISICA",
+    "calidad_juridica":       "JURIDICA",
+    "calidad_economica":      "ECONOMICA",
+}
 
 
 @router.get("/predio/{numero_predial}")
@@ -35,6 +47,16 @@ def actualizar_calidad(
     current_user = Depends(get_current_user)
 ):
     """Aprueba o revierte un aspecto de calidad"""
+    if body.valor == 1 and body.campo in CAMPO_A_CATEGORIA:
+        categoria = CAMPO_A_CATEGORIA[body.campo]
+        if marca_predio_repo.tiene_marca_abierta_en_categoria(db, id_operacion, categoria):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"No se puede aprobar '{body.campo}': el predio tiene "
+                    f"marcas abiertas en categoría {categoria}."
+                ),
+            )
     try:
         calidad_repo.actualizar_calidad(db, id_operacion, body.campo, body.valor)
     except ValueError as e:

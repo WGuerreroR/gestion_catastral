@@ -21,6 +21,17 @@ export const marcasPredioApi = {
 
   reabrir: (idOperacion, marcaId, observacion) =>
     api.patch(`${base(idOperacion)}/${marcaId}/reabrir`, { observacion }).then(r => r.data),
+
+  listarGlobal: ({ solo_mias = true, estado, categoria, prioridad, q, limit, offset } = {}) => {
+    const params = { solo_mias }
+    if (estado    !== undefined) params.estado    = estado
+    if (categoria !== undefined) params.categoria = categoria
+    if (prioridad !== undefined) params.prioridad = prioridad
+    if (q         !== undefined) params.q         = q
+    if (limit     !== undefined) params.limit     = limit
+    if (offset    !== undefined) params.offset    = offset
+    return api.get('/marcas/', { params }).then(r => r.data)
+  },
 }
 
 export default marcasPredioApi

@@ -49,12 +49,13 @@ const BLOQUES_CALIDAD = [
 ]
 
 // ── Bloque de calidad ────────────────────────────────────────────────────────
-function BloqueCalidad({ bloque, predio, onActualizar, onGuardarObs, actualizando, guardandoObs, onMarcasChanged }) {
+function BloqueCalidad({ bloque, predio, onActualizar, onGuardarObs, actualizando, guardandoObs, onMarcasChanged, marcasAbiertasEnCategoria = 0 }) {
   const valor     = predio[bloque.key]
   const obsActual = predio[bloque.campoObs] || ''
   const aprobado  = valor === 1
   const enProceso = actualizando === bloque.key
   const guardando = guardandoObs === bloque.campoObs
+  const bloqueadoPorMarcas = marcasAbiertasEnCategoria > 0
 
   const [editando, setEditando] = useState(false)
   const [obsLocal, setObsLocal] = useState(obsActual)
@@ -136,13 +137,21 @@ function BloqueCalidad({ bloque, predio, onActualizar, onGuardarObs, actualizand
         )}
 
         <Stack direction="row" spacing={1} mt={2}>
-          <Button fullWidth size="small"
-            variant={aprobado ? 'outlined' : 'contained'} color="success"
-            startIcon={enProceso && !aprobado
-              ? <CircularProgress size={14} color="inherit" /> : <CheckCircleIcon />}
-            onClick={() => onActualizar(bloque.key, 1)}
-            disabled={aprobado || !!actualizando || editando}
-          >Aprobar</Button>
+          <Tooltip title={
+            bloqueadoPorMarcas && !aprobado
+              ? `Hay ${marcasAbiertasEnCategoria} marca(s) abierta(s) en ${bloque.label} — ciérrelas para aprobar`
+              : ''
+          }>
+            <span style={{ flex: 1, display: 'flex' }}>
+              <Button fullWidth size="small"
+                variant={aprobado ? 'outlined' : 'contained'} color="success"
+                startIcon={enProceso && !aprobado
+                  ? <CircularProgress size={14} color="inherit" /> : <CheckCircleIcon />}
+                onClick={() => onActualizar(bloque.key, 1)}
+                disabled={aprobado || !!actualizando || editando || bloqueadoPorMarcas}
+              >Aprobar</Button>
+            </span>
+          </Tooltip>
           <Button fullWidth size="small"
             variant={!aprobado ? 'outlined' : 'contained'} color="warning"
             startIcon={enProceso && aprobado
@@ -165,8 +174,9 @@ function BloqueCalidad({ bloque, predio, onActualizar, onGuardarObs, actualizand
 }
 
 // ── Indicador compacto ───────────────────────────────────────────────────────
-function IndicadorValidacion({ total }) {
+function IndicadorValidacion({ predio }) {
   const totalBloques = BLOQUES_CALIDAD.length
+  const total = BLOQUES_CALIDAD.filter(b => predio?.[b.key] === 1).length
   const completo = total === totalBloques
   return (
     <Paper elevation={0} sx={{
@@ -182,16 +192,19 @@ function IndicadorValidacion({ total }) {
         {completo ? 'Predio totalmente validado' : `${total} / ${totalBloques} aspectos aprobados`}
       </Typography>
       <Stack direction="row" spacing={0.5} ml={0.5}>
-        {BLOQUES_CALIDAD.map((b, i) => (
-          <Tooltip key={b.key} title={b.label}>
-            <Box sx={{
-              width: 10, height: 10, borderRadius: '50%',
-              bgcolor: i < total
-                ? (completo ? 'white' : 'success.main')
-                : 'rgba(0,0,0,0.2)',
-            }} />
-          </Tooltip>
-        ))}
+        {BLOQUES_CALIDAD.map((b) => {
+          const aprobado = predio?.[b.key] === 1
+          return (
+            <Tooltip key={b.key} title={`${b.label}: ${aprobado ? 'aprobado' : 'sin revisar'}`}>
+              <Box sx={{
+                width: 10, height: 10, borderRadius: '50%',
+                bgcolor: aprobado
+                  ? (completo ? 'white' : 'success.main')
+                  : 'rgba(0,0,0,0.2)',
+              }} />
+            </Tooltip>
+          )
+        })}
       </Stack>
     </Paper>
   )
@@ -258,21 +271,27 @@ export default function CalidadPredio() {
   const [actualizando, setActualizando] = useState(null)
   const [guardandoObs, setGuardandoObs] = useState(null)
   const [verCompletoOpen, setVerCompletoOpen] = useState(false)
-  const [marcasCount, setMarcasCount] = useState({ abiertas: 0, total: 0 })
+  const [marcasCount, setMarcasCount] = useState({ abiertas: 0, total: 0, abiertasPorCategoria: {} })
 
   const cargarMarcasCount = useCallback(async (idOp) => {
     if (!idOp) {
-      setMarcasCount({ abiertas: 0, total: 0 })
+      setMarcasCount({ abiertas: 0, total: 0, abiertasPorCategoria: {} })
       return
     }
     try {
       const data = await marcasPredioApi.listar(idOp)
+      const abiertas = data.filter(m => m.estado === 'ABIERTA')
+      const abiertasPorCategoria = abiertas.reduce((acc, m) => {
+        if (m.categoria) acc[m.categoria] = (acc[m.categoria] || 0) + 1
+        return acc
+      }, {})
       setMarcasCount({
-        abiertas: data.filter(m => m.estado === 'ABIERTA').length,
+        abiertas: abiertas.length,
         total:    data.length,
+        abiertasPorCategoria,
       })
     } catch {
-      setMarcasCount({ abiertas: 0, total: 0 })
+      setMarcasCount({ abiertas: 0, total: 0, abiertasPorCategoria: {} })
     }
   }, [])
 
@@ -338,10 +357,6 @@ export default function CalidadPredio() {
     return partes.length > 0 ? partes.join(' ') : (p.nombre_predio || '—')
   }
 
-  const totalAprobados = predio
-    ? BLOQUES_CALIDAD.filter(b => predio[b.key] === 1).length
-    : 0
-
   return (
     <Box sx={{ p: 3 }}>
 
@@ -377,7 +392,7 @@ export default function CalidadPredio() {
               />
             </Tooltip>
           )}
-          {predio && <IndicadorValidacion total={totalAprobados} />}
+          {predio && <IndicadorValidacion predio={predio} />}
         </Stack>
       </Box>
       <Typography variant="body2" color="text.secondary" mb={3}>
@@ -473,20 +488,31 @@ export default function CalidadPredio() {
           
           {/* Columna derecha: calidades */}
           <Grid item xs={12} md={8}>
-            <Typography variant="subtitle1" fontWeight={600} mb={2}>Aspectos de calidad</Typography>
+            <Typography variant="subtitle1" fontWeight={550} mb={2}>Aspectos de calidad</Typography>
             <Grid container spacing={2}>
-              {BLOQUES_CALIDAD.map(bloque => (
-                <Grid item xs={12} sm={6} key={bloque.key}>
-                  <BloqueCalidad
-                    bloque={bloque} predio={predio}
-                    onActualizar={handleActualizar}
-                    onGuardarObs={handleGuardarObs}
-                    actualizando={actualizando}
-                    guardandoObs={guardandoObs}
-                    onMarcasChanged={() => cargarMarcasCount(predio.id_operacion)}
-                  />
-                </Grid>
-              ))}
+              {BLOQUES_CALIDAD.map(bloque => {
+                const esCampo = bloque.key === 'calidad_campo'
+                const gridProps = esCampo
+                  ? { sx: { width: 550, maxWidth: 550, flexBasis: 550, flexGrow: 0 } }
+                  : { xs: 12, sm: 6 }
+                return (
+                  <Grid item key={bloque.key} {...gridProps}>
+                    <BloqueCalidad
+                      bloque={bloque} predio={predio}
+                      onActualizar={handleActualizar}
+                      onGuardarObs={handleGuardarObs}
+                      actualizando={actualizando}
+                      guardandoObs={guardandoObs}
+                      onMarcasChanged={() => cargarMarcasCount(predio.id_operacion)}
+                      marcasAbiertasEnCategoria={
+                        bloque.categoria
+                          ? (marcasCount.abiertasPorCategoria[bloque.categoria] || 0)
+                          : 0
+                      }
+                    />
+                  </Grid>
+                )
+              })}
             </Grid>
           </Grid>
 

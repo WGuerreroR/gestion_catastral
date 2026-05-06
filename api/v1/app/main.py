@@ -50,7 +50,8 @@ app.include_router(calidad_externa.router,     prefix="/api/v1")
 app.include_router(calidad_muestreo.router,    prefix="/api/v1")
 app.include_router(dominios.router,            prefix="/api/v1")
 app.include_router(tipos_marca.router,         prefix="/api/v1")
-app.include_router(marcas_predio.router,       prefix="/api/v1")
+app.include_router(marcas_predio.router,        prefix="/api/v1")
+app.include_router(marcas_predio.router_global, prefix="/api/v1")
 
 router = APIRouter()
 

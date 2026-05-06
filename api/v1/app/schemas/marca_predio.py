@@ -51,6 +51,7 @@ class MarcaPredioResponse(BaseModel):
     fecha_creacion:         datetime
     creado_por:             int
     creado_por_nombre:      Optional[str] = None
+    npn:                    Optional[str] = None
 
     class Config:
         from_attributes = True

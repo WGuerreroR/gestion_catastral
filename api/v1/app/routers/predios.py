@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional, List
 
 from db.database import get_db
 from core.deps import get_current_user, require_roles
-from repositories import predio_repo, predio_completo_repo, predio_guardar_repo
+from repositories import predio_repo, predio_completo_repo, predio_guardar_repo, marca_predio_repo
 from schemas.predio import PredioResponse
 from services import predio_fotos_service, predio_form_loader, predio_validators, predio_pdf_service
 
@@ -158,6 +158,19 @@ def guardar_predio(
     secciones_idx = predio_form_loader.secciones_por_tabla(form)
     user_roles    = set(user.get("roles") or [])
 
+    # Bypass por marca: si el usuario es responsable de una marca abierta del
+    # predio, puede editar aunque no califique por roles_edicion.
+    try:
+        persona_id_actual = int(user["sub"])
+    except (KeyError, TypeError, ValueError):
+        persona_id_actual = None
+    edita_por_marca = (
+        persona_id_actual is not None
+        and marca_predio_repo.has_marca_abierta_como_responsable(
+            db, id_operacion, persona_id_actual
+        )
+    )
+
     # 1. Validar permisos + whitelist de campos + reglas server-side
     errores_globales: dict = {}
     cambios_normalizados: list[tuple[str, dict, list[dict]]] = []
@@ -171,7 +184,7 @@ def guardar_predio(
             )
 
         roles_edicion = set(seccion.get("roles_edicion") or [])
-        if roles_edicion and not (user_roles & roles_edicion):
+        if roles_edicion and not (user_roles & roles_edicion) and not edita_por_marca:
             raise HTTPException(
                 403,
                 f"Sección '{seccion.get('id')}' requiere uno de estos "

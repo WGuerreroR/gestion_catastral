@@ -124,6 +124,124 @@ def cambiar_estado(db: Session, marca_id: int, nuevo_estado: str, tipo_evento: s
     return True
 
 
+_PRIORIDAD_ORDER = "CASE m.prioridad WHEN 'ALTA' THEN 1 WHEN 'MEDIA' THEN 2 ELSE 3 END"
+
+
+def _filtros_global(responsable_id, estado, categoria, prioridad, q):
+    where = []
+    params: dict = {}
+    if responsable_id is not None:
+        where.append("m.responsable_id = :responsable_id")
+        params["responsable_id"] = responsable_id
+    if estado:
+        where.append("m.estado = :estado")
+        params["estado"] = estado
+    if categoria:
+        where.append("m.categoria = :categoria")
+        params["categoria"] = categoria
+    if prioridad:
+        where.append("m.prioridad = :prioridad")
+        params["prioridad"] = prioridad
+    if q:
+        where.append("(m.id_operacion ILIKE :q OR lc.numero_predial ILIKE :q)")
+        params["q"] = f"%{q}%"
+    return where, params
+
+
+def listar_marcas_global(
+    db: Session,
+    responsable_id: int | None = None,
+    estado: str | None = None,
+    categoria: str | None = None,
+    prioridad: str | None = None,
+    q: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+):
+    where, params = _filtros_global(responsable_id, estado, categoria, prioridad, q)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    sql = f"""
+        SELECT
+            m.id,
+            m.id_operacion,
+            m.categoria,
+            m.tipo_marca_id,
+            tm.codigo       AS tipo_marca_codigo,
+            tm.significado  AS tipo_marca_significado,
+            m.descripcion_novedad,
+            m.fuente_deteccion,
+            m.prioridad,
+            m.accion_sugerida,
+            m.responsable_id,
+            {_NOMBRE_PERSONA.replace('p.', 'r.')} AS responsable_nombre,
+            m.estado_esperado,
+            m.observacion,
+            m.estado,
+            m.fecha_creacion,
+            m.creado_por,
+            {_NOMBRE_PERSONA.replace('p.', 'c.')} AS creado_por_nombre,
+            lc.numero_predial AS npn
+        FROM admin_marca_predio m
+        JOIN admin_tipo_marca   tm ON tm.id = m.tipo_marca_id
+        LEFT JOIN admin_personas r  ON r.id = m.responsable_id
+        LEFT JOIN admin_personas c  ON c.id = m.creado_por
+        LEFT JOIN lc_predio_p    lc ON lc.id_operacion = m.id_operacion
+        {where_sql}
+        ORDER BY (m.estado='ABIERTA') DESC,
+                 {_PRIORIDAD_ORDER},
+                 m.fecha_creacion DESC
+        LIMIT :limit OFFSET :offset
+    """
+    params["limit"] = limit
+    params["offset"] = offset
+    resultado = db.execute(text(sql), params).fetchall()
+    return [dict(r._mapping) for r in resultado]
+
+
+def count_marcas_global(
+    db: Session,
+    responsable_id: int | None = None,
+    estado: str | None = None,
+    categoria: str | None = None,
+    prioridad: str | None = None,
+    q: str | None = None,
+) -> int:
+    where, params = _filtros_global(responsable_id, estado, categoria, prioridad, q)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+    sql = f"""
+        SELECT COUNT(*) AS total
+        FROM admin_marca_predio m
+        LEFT JOIN lc_predio_p lc ON lc.id_operacion = m.id_operacion
+        {where_sql}
+    """
+    fila = db.execute(text(sql), params).fetchone()
+    return int(fila.total) if fila else 0
+
+
+def has_marca_abierta_como_responsable(db: Session, id_operacion: str, persona_id: int) -> bool:
+    fila = db.execute(text("""
+        SELECT 1
+        FROM admin_marca_predio
+        WHERE id_operacion = :id_op
+          AND responsable_id = :persona_id
+          AND estado = 'ABIERTA'
+        LIMIT 1
+    """), {"id_op": id_operacion, "persona_id": persona_id}).fetchone()
+    return fila is not None
+
+
+def tiene_marca_abierta_en_categoria(db: Session, id_operacion: str, categoria: str) -> bool:
+    fila = db.execute(text("""
+        SELECT 1
+        FROM admin_marca_predio
+        WHERE id_operacion = :id_op
+          AND categoria = :categoria
+          AND estado = 'ABIERTA'
+        LIMIT 1
+    """), {"id_op": id_operacion, "categoria": categoria}).fetchone()
+    return fila is not None
+
+
 def listar_eventos(db: Session, marca_id: int):
     resultado = db.execute(text(f"""
         SELECT

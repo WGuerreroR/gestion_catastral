@@ -87,11 +87,12 @@ function buildSeccionPorTabla(formConfig) {
 }
 
 
-function calcularModoEfectivo(seccion, modoOverride, hasRole) {
+function calcularModoEfectivo(seccion, modoOverride, hasRole, bypassRolesEdicion = false) {
   const modoBase = modoOverride || seccion.modo || 'view'
   if (modoBase !== 'edit') return { modo: 'view', forzado: false }
   const rolesPermitidos = seccion.roles_edicion || []
   if (rolesPermitidos.length === 0) return { modo: 'edit', forzado: false }
+  if (bypassRolesEdicion) return { modo: 'edit', forzado: false }
   const tienePermiso = rolesPermitidos.some(r => hasRole(r))
   return tienePermiso
     ? { modo: 'edit', forzado: false }
@@ -99,12 +100,13 @@ function calcularModoEfectivo(seccion, modoOverride, hasRole) {
 }
 
 
-function tieneAlgunaSeccionEditable(formConfig, hasRole) {
+function tieneAlgunaSeccionEditable(formConfig, hasRole, bypassRolesEdicion = false) {
   for (const s of (formConfig?.secciones || [])) {
     const candidatos = [s, s.subseccion].filter(Boolean)
     for (const c of candidatos) {
       const roles = c.roles_edicion || []
       if (roles.length === 0) continue
+      if (bypassRolesEdicion) return true
       if (roles.some(r => hasRole(r))) return true
     }
   }
@@ -187,6 +189,7 @@ export default function PredioVisor({
   formConfig,
   busqueda,
   modoOverride: modoOverrideExterno = null,
+  bypassRolesEdicion = false,
   onSave,
   onCancel,
   className,
@@ -223,8 +226,8 @@ export default function PredioVisor({
   const secciones = formConfig?.secciones || []
   const capasPorSeccion = useMemo(() => buildCapasPorSeccion(formConfig), [formConfig])
   const hayAlgoEditable = useMemo(
-    () => tieneAlgunaSeccionEditable(formConfig, hasRole),
-    [formConfig, hasRole]
+    () => tieneAlgunaSeccionEditable(formConfig, hasRole, bypassRolesEdicion),
+    [formConfig, hasRole, bypassRolesEdicion]
   )
 
   // ─────────── handlers de modo edit ─────────────────────────────
@@ -460,6 +463,7 @@ export default function PredioVisor({
               predioCompleto={datosConCambios}
               modoOverride={modoOverride}
               hasRole={hasRole}
+              bypassRolesEdicion={bypassRolesEdicion}
               onChangeCampo={handleChangeCampo}
               idOperacion={datosConCambios.predio?.id_operacion}
               capaVinculada={capasPorSeccion[seccion.id]}
@@ -472,8 +476,8 @@ export default function PredioVisor({
 }
 
 
-function SeccionRender({ seccion, predioCompleto, modoOverride, hasRole, onChangeCampo, idOperacion, capaVinculada }) {
-  const { modo, forzado } = calcularModoEfectivo(seccion, modoOverride, hasRole)
+function SeccionRender({ seccion, predioCompleto, modoOverride, hasRole, bypassRolesEdicion, onChangeCampo, idOperacion, capaVinculada }) {
+  const { modo, forzado } = calcularModoEfectivo(seccion, modoOverride, hasRole, bypassRolesEdicion)
 
   if (seccion.tipo === 'mapa') {
     return (
