@@ -22,7 +22,7 @@ export default function Login() {
 
   // Si ya está autenticado redirigir
   useEffect(() => {
-    if (user) navigate('/dashboard')
+    if (user) navigate('/asignaciones')
   }, [user])
 
   // Limpiar error al desmontar
@@ -42,7 +42,7 @@ export default function Login() {
         username: parseInt(form.identificacion),
         password: form.password
       })).unwrap()
-      navigate('/dashboard')
+      navigate('/asignaciones')
     } catch {
       // El error ya queda en Redux
     }

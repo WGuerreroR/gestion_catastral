@@ -18,6 +18,9 @@ import CalidadAsignacionesDetalle from './pages/CalidadAsignacionesDetalle'
 import PredioVisorPage       from './pages/PredioVisorPage'
 import TiposMarca       from './pages/TiposMarca'
 import Marcas            from './pages/Marcas'
+import ValidacionCalidad        from './pages/ValidacionCalidad'
+import ValidacionCalidadJob     from './pages/ValidacionCalidadJob'
+import ValidacionCalidadReglas  from './pages/ValidacionCalidadReglas'
 import ProtectedRoute from './components/ProtectedRoute'
 import Sidebar, { SIDEBAR_WIDTH, SIDEBAR_WIDTH_CLOSED } from './components/Sidebar'
 import Navbar         from './components/Navbar'
@@ -63,7 +66,7 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={!user ? <Login /> : <Navigate to="/dashboard" />} />
+      <Route path="/login" element={!user ? <Login /> : <Navigate to="/asignaciones" />} />
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard"    element={<Layout><Dashboard /></Layout>} />
         <Route path="/personas"     element={<Layout><Personas /></Layout>} />
@@ -80,9 +83,12 @@ export default function App() {
         <Route path="/asignaciones" element={<Layout><Asignaciones /></Layout>} />
         <Route path="/asignaciones/:id" element={<Layout><AsignacionDetalle /></Layout>} />
         <Route path="/predios/visor"    element={<Layout><PredioVisorPage /></Layout>} />
+        <Route path="/validacion-calidad"            element={<Layout><ValidacionCalidad /></Layout>} />
+        <Route path="/validacion-calidad/jobs/:id"   element={<Layout><ValidacionCalidadJob /></Layout>} />
+        <Route path="/validacion-calidad/reglas"     element={<Layout><ValidacionCalidadReglas /></Layout>} />
         <Route path="/perfil"       element={<Layout><Perfil /></Layout>} />
       </Route>
-      <Route path="*" element={<Navigate to={user ? '/dashboard' : '/login'} />} />
+      <Route path="*" element={<Navigate to={user ? '/asignaciones' : '/login'} />} />
     </Routes>
   )
 }

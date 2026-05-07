@@ -58,7 +58,7 @@ const menuItems = [
       roles: ['administrador']
     },
     {
-      label: 'Validación',
+      label: 'Seguimiento',
       path:  '/validacion',
       icon:  <FactCheckIcon />,
       roles: ['administrador']
@@ -80,6 +80,12 @@ const menuItems = [
       path:  '/calidad-asignaciones',
       icon:  <FactCheckIcon />,
       roles: ['administrador', 'supervisor']
+    },
+    {
+      label: 'Validación de calidad',
+      path:  '/validacion-calidad',
+      icon:  <FactCheckIcon />,
+      roles: ['administrador', 'supervisor', 'coordinador']
     },
 
     {
