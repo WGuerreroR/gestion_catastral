@@ -10,13 +10,35 @@ services:
     working_dir: /app
     ports:
       - "8400:8400"
+    environment:
+      API_ILI_URL: http://api-ili:8080
+      API_ILI_ADMIN_USER: ${ILI_API_ADMIN_USER:-admin}
+      API_ILI_ADMIN_PASSWORD: ${ILI_API_ADMIN_PASSWORD:-changeme}
+  
 
-
-  app:
-    build: ./webapp
+  qgis-server-v1:
+    image: camptocamp/qgis-server:3.44
     ports:
-      - "80:80"
-    restart: always
+    - 8300:80
+    volumes:
+    - ./data/qgis/qgis-server-v1:/data:ro
+    environment:
+    - LANG=en_EN.UTF-8
+    - QGIS_PROJECT_FILE=/data/proyecto.qgz
+    - QGIS_SERVER_LOG_LEVEL=0
+    - DEBUG=1
+
+  qgis-server-v2:
+    image: camptocamp/qgis-server:3.44
+    ports:
+    - 8200:80
+    volumes:
+    - ./data/qgis/qgis-server-v2:/data:ro
+    environment:
+    - LANG=en_EN.UTF-8
+    - QGIS_PROJECT_FILE=/data/proyecto.qgz
+    - QGIS_SERVER_LOG_LEVEL=0
+    - DEBUG=1
 
   db:
     image: postgis/postgis:18-3.6-alpine
