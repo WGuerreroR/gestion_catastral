@@ -65,14 +65,24 @@ TABLAS_DATOS_VACIAS = [
     "procedimiento_catresg", "restriccion",
 ]
 
-# Tablas relacionadas que se pueblan tras insertar lc_predio_p
+# Tablas relacionadas que se pueblan tras insertar lc_predio_p.
+# cr_unidadconstruccion NO tiene id_operacion_predio directo — se enlaza vía
+# cr_caracteristicasunidadconstruccion.id_operacion_unidad_cons →
+# cr_unidadconstruccion.id_operacion_unidad_const (se trata aparte).
 TABLAS_RELACIONADAS = [
     ("cr_terreno",                          "id_operacion_predio"),
-    ("cr_unidadconstruccion",               "id_operacion_predio"),
     ("cr_caracteristicasunidadconstruccion","id_operacion_predio"),
     ("cr_interesado",                       "id_operacion_predio"),
     ("lc_derecho",                          None),  # se omite si no hay FK directo
 ]
+
+# Subquery que devuelve los id_operacion_unidad_const correspondientes a los
+# predios de una tabla de alcance dada (con alias `ap.id_operacion`).
+_SUBQUERY_UNIDADES_DEL_ALCANCE = """
+    SELECT c.id_operacion_unidad_cons
+      FROM public.cr_caracteristicasunidadconstruccion c
+      JOIN {tabla_alcance} ap ON ap.id_operacion = c.id_operacion_predio
+"""
 
 
 # ── Validación al guardar reglas ────────────────────────────────────────────
@@ -289,8 +299,9 @@ def _limpiar_alcance_en_validado(db: Session, alcance_tipo: str,
     pudieron procesar)."""
     warnings: list[str] = []
     relacionadas = (
-        "cr_terreno", "cr_unidadconstruccion",
-        "cr_caracteristicasunidadconstruccion", "cr_interesado",
+        "cr_terreno",
+        "cr_caracteristicasunidadconstruccion",
+        "cr_interesado",
     )
 
     # 1) Tabla principal — si esto falla el caller decide qué hacer
@@ -303,8 +314,7 @@ def _limpiar_alcance_en_validado(db: Session, alcance_tipo: str,
         """))
     db.commit()
 
-    # 2) Relacionadas — solo las que tengan id_operacion_predio.
-    #    cr_unidadconstruccion, p.ej., NO lo tiene (usa id_operacion_unidad_const).
+    # 2) Relacionadas con FK directa id_operacion_predio.
     for t in relacionadas:
         if not _tabla_validado_existe(db, t):
             continue
@@ -324,6 +334,25 @@ def _limpiar_alcance_en_validado(db: Session, alcance_tipo: str,
             try: db.rollback()
             except Exception: pass
             msg = f"validado.{t}: fallo al limpiar — {str(e)[:200]}"
+            logger.warning(f"[validacion_calidad] {msg}")
+            warnings.append(msg)
+
+    # 3) Caso especial: cr_unidadconstruccion se enlaza vía la tabla puente.
+    if _tabla_validado_existe(db, "cr_unidadconstruccion"):
+        try:
+            if alcance_tipo == "todo":
+                db.execute(text("TRUNCATE validado.cr_unidadconstruccion"))
+            else:
+                subq = _SUBQUERY_UNIDADES_DEL_ALCANCE.format(tabla_alcance=tabla_alcance)
+                db.execute(text(f"""
+                    DELETE FROM validado.cr_unidadconstruccion
+                     WHERE id_operacion_unidad_const IN ({subq})
+                """))
+            db.commit()
+        except Exception as e:
+            try: db.rollback()
+            except Exception: pass
+            msg = f"validado.cr_unidadconstruccion: fallo al limpiar — {str(e)[:200]}"
             logger.warning(f"[validacion_calidad] {msg}")
             warnings.append(msg)
     return warnings
@@ -371,11 +400,12 @@ def _insertar_predios_validos(db: Session, job_id: int, tabla_alcance: str,
 
 
 def _poblar_relacionadas(db: Session) -> list[str]:
-    """Pobla validado.cr_terreno, cr_unidadconstruccion, cr_caracteristicas...,
-    cr_interesado a partir de los predios ya insertados en validado.lc_predio_p.
-    Cada tabla aislada — si una falla las demás continúan. Skip si la tabla
-    pública no tiene la FK declarada (caso cr_unidadconstruccion sin
-    id_operacion_predio). Devuelve lista de warnings."""
+    """Pobla validado.cr_terreno, cr_caracteristicas..., cr_interesado y
+    cr_unidadconstruccion a partir de los predios ya insertados en
+    validado.lc_predio_p. Cada tabla aislada — si una falla las demás continúan.
+    cr_unidadconstruccion se enlaza vía la tabla puente
+    cr_caracteristicasunidadconstruccion (no tiene id_operacion_predio directo).
+    Devuelve lista de warnings."""
     warnings: list[str] = []
     for tabla, fk in TABLAS_RELACIONADAS:
         if not fk:
@@ -396,6 +426,30 @@ def _poblar_relacionadas(db: Session) -> list[str]:
             try: db.rollback()
             except Exception: pass
             msg = f"validado.{tabla}: fallo al poblar — {str(e)[:200]}"
+            logger.warning(f"[validacion_calidad] {msg}")
+            warnings.append(msg)
+
+    # Caso especial: cr_unidadconstruccion. Se obtiene la lista de unidades
+    # asociadas a los predios ya en validado.lc_predio_p mediante la tabla
+    # puente cr_caracteristicasunidadconstruccion (ojo a los nombres:
+    # 'unidad_const' en cr_unidadconstruccion vs 'unidad_cons' en la puente).
+    if _tabla_validado_existe(db, "cr_unidadconstruccion"):
+        try:
+            db.execute(text("""
+                INSERT INTO validado.cr_unidadconstruccion
+                SELECT u.* FROM public.cr_unidadconstruccion u
+                 WHERE u.id_operacion_unidad_const IN (
+                   SELECT c.id_operacion_unidad_cons
+                     FROM public.cr_caracteristicasunidadconstruccion c
+                     JOIN validado.lc_predio_p p
+                       ON p.id_operacion = c.id_operacion_predio
+                 )
+            """))
+            db.commit()
+        except Exception as e:
+            try: db.rollback()
+            except Exception: pass
+            msg = f"validado.cr_unidadconstruccion: fallo al poblar — {str(e)[:200]}"
             logger.warning(f"[validacion_calidad] {msg}")
             warnings.append(msg)
     return warnings
