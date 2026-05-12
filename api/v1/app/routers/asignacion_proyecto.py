@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from db.database import get_db
 from core.deps import (
-    get_current_user, require_roles,
+    get_current_user, get_user_from_token_or_header, require_roles,
     es_admin_proyecto, filtro_responsable, ROLES_ADMIN_PROYECTO,
 )
 from core.security import verify_password
@@ -1106,10 +1106,14 @@ def offline_servir_foto(
     proyecto_id: int,
     ruta_relativa: str,
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(get_user_from_token_or_header),
 ):
     """
     Sirve una foto del paquete offline de la asignación.
+
+    Acepta el token JWT como header `Authorization: Bearer ...` o como
+    query param `?token=...`. El query param es necesario para uso desde
+    `<img src>` directo, que no manda headers.
 
     `ruta_relativa` viene como está guardada en PostGIS, típicamente
     `DCIM/foto.jpg` (relativa al .qgs del paquete offline, igual a lo que
@@ -1127,7 +1131,7 @@ def offline_servir_foto(
 
     Defensa contra path traversal: rechaza `..` y paths absolutos.
     """
-    from services.qgis_export_service import EXPORTS_DIR
+    from services.qgis_export_service import DCIM_DIR
 
     # Defensa contra path traversal
     if (
@@ -1138,19 +1142,16 @@ def offline_servir_foto(
     ):
         raise HTTPException(400, "Ruta inválida")
 
-    proyecto = _assert_acceso_proyecto(db, proyecto_id, _user)
+    _assert_acceso_proyecto(db, proyecto_id, _user)
 
-    clave = proyecto.get("clave_proyecto")
-    if not clave:
-        raise HTTPException(404, "Proyecto sin clave_proyecto")
-
-    ruta_absoluta = os.path.normpath(
-        os.path.join(EXPORTS_DIR, clave, ruta_relativa)
-    )
-    # Doble check: normpath no debe llevar fuera de EXPORTS_DIR/{clave}/
-    raiz_proyecto = os.path.normpath(os.path.join(EXPORTS_DIR, clave))
-    if not ruta_absoluta.startswith(raiz_proyecto + os.sep):
-        raise HTTPException(400, "Ruta fuera del directorio del proyecto")
+    # Convención canónica (post-migración 025): toda foto vive en DCIM_DIR
+    # como carpeta plana. Resolvemos por basename de la ruta — tolera
+    # prefijo 'DCIM/', 'imgs/' (legacy) o nombre suelto.
+    nombre = os.path.basename(ruta_relativa.replace("\\", "/"))
+    ruta_absoluta = os.path.normpath(os.path.join(DCIM_DIR, nombre))
+    raiz = os.path.normpath(DCIM_DIR)
+    if not ruta_absoluta.startswith(raiz + os.sep):
+        raise HTTPException(400, "Ruta fuera del repo central")
 
     if not os.path.isfile(ruta_absoluta):
         raise HTTPException(404, "Foto no encontrada")

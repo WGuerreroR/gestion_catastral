@@ -52,9 +52,11 @@ export async function descargarPredioPDF(idOperacion, formId = 'predio-completo-
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-// URL absoluta de una foto del predio (para usar directamente en <img src>)
-const API_HOST = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
+// URL absoluta de una foto del predio (para usar directamente en <img src>).
+// Incluye el JWT como ?token=... porque <img> no manda headers Authorization.
+import { urlConToken } from '../utils/fotoUrl'
+
 export function urlFotoPredio(idOperacion, rutaRelativa) {
   if (!rutaRelativa) return null
-  return `${API_HOST}/api/v1/predios/${encodeURIComponent(idOperacion)}/fotos/${rutaRelativa}`
+  return urlConToken(`/api/v1/predios/${encodeURIComponent(idOperacion)}/fotos/${rutaRelativa}`)
 }

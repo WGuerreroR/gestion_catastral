@@ -4,16 +4,19 @@ import {
   ListItemIcon, ListItemText, Typography, Divider,
   Avatar, Chip, Tooltip, IconButton
 } from '@mui/material'
-import DashboardIcon     from '@mui/icons-material/Dashboard'
-import PeopleIcon        from '@mui/icons-material/People'
-import AdminPanelIcon    from '@mui/icons-material/AdminPanelSettings'
-import AssignmentIcon    from '@mui/icons-material/Assignment'
-import FactCheckIcon        from '@mui/icons-material/FactCheck' 
-import TravelExploreIcon from '@mui/icons-material/TravelExplore'
-import MapIcon           from '@mui/icons-material/Map'
-import HomeWorkIcon      from '@mui/icons-material/HomeWork'
-import LabelIcon         from '@mui/icons-material/Label'
-import FlagOutlinedIcon  from '@mui/icons-material/FlagOutlined'
+import DashboardIcon         from '@mui/icons-material/Dashboard'
+import PeopleIcon            from '@mui/icons-material/People'
+import AdminPanelIcon        from '@mui/icons-material/AdminPanelSettings'
+import AssignmentIcon        from '@mui/icons-material/Assignment'
+import TravelExploreIcon     from '@mui/icons-material/TravelExplore'
+import HomeWorkIcon          from '@mui/icons-material/HomeWork'
+import LabelIcon             from '@mui/icons-material/Label'
+import FlagOutlinedIcon      from '@mui/icons-material/FlagOutlined'
+import SyncAltIcon           from '@mui/icons-material/SyncAlt'
+import TrackChangesIcon      from '@mui/icons-material/TrackChanges'
+import WorkspacePremiumIcon  from '@mui/icons-material/WorkspacePremium'
+import ChecklistIcon         from '@mui/icons-material/Checklist'
+import LibraryAddCheckIcon   from '@mui/icons-material/LibraryAddCheck'
 import ChevronLeftIcon   from '@mui/icons-material/ChevronLeft'
 import ChevronRightIcon  from '@mui/icons-material/ChevronRight'
 import Menu  from '@mui/icons-material/Menu'
@@ -60,7 +63,7 @@ const menuItems = [
     {
       label: 'Seguimiento',
       path:  '/validacion',
-      icon:  <FactCheckIcon />,
+      icon:  <TrackChangesIcon />,
       roles: ['administrador']
     },
     {
@@ -78,14 +81,26 @@ const menuItems = [
     {
       label: 'Calidad por asignación',
       path:  '/calidad-asignaciones',
-      icon:  <FactCheckIcon />,
+      icon:  <WorkspacePremiumIcon />,
       roles: ['administrador', 'supervisor']
     },
     {
       label: 'Validación de calidad',
       path:  '/validacion-calidad',
-      icon:  <FactCheckIcon />,
+      icon:  <ChecklistIcon />,
       roles: ['administrador', 'supervisor', 'coordinador']
+    },
+    {
+      label: 'Revisión masiva',
+      path:  '/revision-masiva',
+      icon:  <LibraryAddCheckIcon />,
+      roles: ['administrador', 'supervisor', 'coordinador']
+    },
+    {
+      label: 'Migración LADM',
+      path:  '/migracion-ladm',
+      icon:  <SyncAltIcon />,
+      roles: ['administrador']
     },
 
     {

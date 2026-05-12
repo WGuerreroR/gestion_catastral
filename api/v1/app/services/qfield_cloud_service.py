@@ -444,6 +444,9 @@ def tarea_sincronizar_cloud(proyecto_id: int):
             _cloud_progreso[proyecto_id]["archivos_procesados"] = i + 1
             _cloud_progreso[proyecto_id]["progreso"] = int((i + 1) / max(total, 1) * 100)
 
+        # Replicar fotos del DCIM descargado al repo central DCIM_DIR.
+        _replicar_dcim_a_repo_central(carpeta)
+
         asignacion_proyecto_repo.actualizar_ultima_sincronizacion_cloud(db, proyecto_id)
 
     except CancelacionUsuarioCloud:
@@ -514,8 +517,27 @@ def bajar_desde_cloud(db, proyecto_id: int) -> dict:
 
     svc = QFieldCloudService()
     svc.descargar_proyecto(cloud_id, carpeta)
+    _replicar_dcim_a_repo_central(carpeta)
     asignacion_proyecto_repo.actualizar_ultima_sincronizacion_cloud(db, proyecto_id)
 
     return {
         "mensaje": "Cambios del campo descargados a la carpeta local",
     }
+
+
+def _replicar_dcim_a_repo_central(carpeta: str) -> None:
+    """Tras descargar el proyecto del Cloud, replica el DCIM/ del paquete al
+    repo central `DCIM_DIR`. Las rutas en BD ya viven en formato
+    `DCIM/<archivo>` (migración 025) — no hay nada que reescribir, solo
+    asegurar que el archivo físico esté en el repo central."""
+    from services.qfield_photo_service import copiar_a_repo_central
+
+    dcim_local = os.path.join(carpeta, "DCIM")
+    if not os.path.isdir(dcim_local):
+        return
+
+    for archivo in os.listdir(dcim_local):
+        origen = os.path.join(dcim_local, archivo)
+        if not os.path.isfile(origen):
+            continue
+        copiar_a_repo_central(origen, archivo)

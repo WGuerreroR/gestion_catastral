@@ -61,7 +61,19 @@ def actualizar_calidad(
         calidad_repo.actualizar_calidad(db, id_operacion, body.campo, body.valor)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"ok": True, "campo": body.campo, "valor": body.valor}
+
+    ucs_recalculadas = 0
+    if body.campo == "calidad_fisica" and body.valor == 1:
+        ucs_recalculadas = calidad_repo.recalcular_total_calificacion_predio(
+            db, id_operacion
+        )
+
+    return {
+        "ok": True,
+        "campo": body.campo,
+        "valor": body.valor,
+        "ucs_recalculadas": ucs_recalculadas,
+    }
 
 
 @router.patch("/predio/{id_operacion}/observacion")

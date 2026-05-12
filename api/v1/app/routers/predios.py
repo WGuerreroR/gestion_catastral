@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from typing import Any, Dict, Optional, List
 
 from db.database import get_db
-from core.deps import get_current_user, require_roles
+from core.deps import get_current_user, get_user_from_token_or_header, require_roles
 from repositories import predio_repo, predio_completo_repo, predio_guardar_repo, marca_predio_repo
 from schemas.predio import PredioResponse
 from services import predio_fotos_service, predio_form_loader, predio_validators, predio_pdf_service
@@ -77,13 +77,17 @@ def servir_foto_predio(
     id_operacion: str,
     ruta_relativa: str,
     db: Session = Depends(get_db),
-    _user=Depends(get_current_user),
+    _user=Depends(get_user_from_token_or_header),
 ):
     """
     Sirve una foto del predio resolviendo internamente el último
     proyecto activo del predio (el visor no nace dentro de un
     contexto de proyecto). 404 si el predio no tiene proyecto
     asociado o si la foto no existe en disco.
+
+    Acepta el token JWT como header `Authorization: Bearer ...` o como
+    query param `?token=...`. El query param es necesario para uso desde
+    `<img src>` directo, que no manda headers.
     """
     proyecto = predio_fotos_service.resolver_proyecto_activo(db, id_operacion)
     if not proyecto:

@@ -12,3 +12,6 @@ api/v1/app/utils/__pycache__/*
 tests/__init__.py
 tests/__pycache__/*
 ETL/*
+api-ili/*
+data/qgis/DCIM/*
+data/qgis/imgs/*

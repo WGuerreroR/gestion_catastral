@@ -28,34 +28,45 @@ from qgis.core import (
     QgsCsException,
 )
 
-# Ruta absoluta a `proyecto_base/` dentro del contenedor. Configurable
-# por env var `PROYECTO_BASE_PATH` (compartida con qfield_photo_service).
-PROYECTO_BASE_DIR = os.environ.get("PROYECTO_BASE_PATH", "/app/data/proyecto_base")
+# Rutas a las dos plantillas QGIS disponibles dentro del contenedor.
+#   - PROYECTO_BASE_DIR    → flujo de asignaciones (generar_paquete_proyecto).
+#   - PROYECTO_CALIDAD_DIR → flujo de calidad-muestreo (generar_paquete_calidad_muestreo).
+# Configurables por env var.
+PROYECTO_BASE_DIR    = os.environ.get("PROYECTO_BASE_PATH",    "/app/data/proyecto_base")
+PROYECTO_CALIDAD_DIR = os.environ.get("PROYECTO_CALIDAD_PATH", "/app/data/proyecto_calidad")
 
 
 class QgisProjectService:
 
-    def __init__(self, clave_proyecto: str, output_base_dir: str):
+    def __init__(
+        self,
+        clave_proyecto: str,
+        output_base_dir: str,
+        proyecto_base_dir: str | None = None,
+    ):
         """
-        clave_proyecto  : identificador del proyecto (nombre de la carpeta y del .qgz)
-        output_base_dir : directorio temporal donde se creará la carpeta de trabajo
+        clave_proyecto    : identificador del proyecto (nombre de la carpeta y del .qgz)
+        output_base_dir   : directorio temporal donde se creará la carpeta de trabajo
+        proyecto_base_dir : plantilla a copiar. Default PROYECTO_BASE_DIR (asignaciones).
+                            Para calidad-muestreo pasar PROYECTO_CALIDAD_DIR.
         """
-        self.clave_proyecto  = clave_proyecto
-        self.output_dir      = os.path.join(output_base_dir, clave_proyecto)
-        self.qgz_path        = None   # se asigna tras copiar
+        self.clave_proyecto    = clave_proyecto
+        self.output_dir        = os.path.join(output_base_dir, clave_proyecto)
+        self.proyecto_base_dir = proyecto_base_dir or PROYECTO_BASE_DIR
+        self.qgz_path          = None   # se asigna tras copiar
 
     # ── Paso 1: Copiar proyecto base ─────────────────────────────────────────
 
     def copiar_proyecto_base(self):
         """
-        Copia toda la carpeta proyecto_base a output_dir y renombra el .qgz
-        con clave_proyecto. Devuelve la ruta del nuevo .qgz.
+        Copia toda la carpeta del proyecto plantilla a output_dir y renombra
+        el .qgz con clave_proyecto. Devuelve la ruta del nuevo .qgz.
         """
-        if not os.path.isdir(PROYECTO_BASE_DIR):
-            raise FileNotFoundError(f"No se encontró el directorio base: {PROYECTO_BASE_DIR}")
+        if not os.path.isdir(self.proyecto_base_dir):
+            raise FileNotFoundError(f"No se encontró el directorio base: {self.proyecto_base_dir}")
 
         # Copiar carpeta completa (sin modificar el original)
-        shutil.copytree(PROYECTO_BASE_DIR, self.output_dir)
+        shutil.copytree(self.proyecto_base_dir, self.output_dir)
 
         # Renombrar el .qgz al nombre de la clave del proyecto
         qgz_files = glob.glob(os.path.join(self.output_dir, "*.qgz"))
@@ -641,6 +652,16 @@ class QgisProjectService:
 
         qgs_path, tmp_dir = self._extraer_qgs()
         try:
+            # Backup de <relations> y <mapcanvas> del .qgs original.
+            # QgsProject.write() los regenera con el estado en memoria, lo
+            # que en este flujo borra las relaciones y restaura el extent
+            # del proyecto base (descartando el centrado en zonas hecho
+            # por actualizar_extent). Restauramos ambos al final.
+            with open(qgs_path, "rb") as _f:
+                _root_orig = etree.fromstring(_f.read())
+            _relations_orig  = _root_orig.find("relations")
+            _mapcanvas_orig  = _root_orig.findall("mapcanvas")
+
             project = QgsProject.instance()
             project.clear()
             project.read(qgs_path)
@@ -708,11 +729,11 @@ class QgisProjectService:
                                if layer.dataProvider() else "?")
                         raise RuntimeError(f"capa Predios muestra inválida: {err}")
 
-                    # Símbolo único: relleno naranja semi-transparente +
-                    # borde rojo grueso, claramente distinguible.
+                    # Símbolo único: relleno azul semi-transparente +
+                    # borde azul oscuro, claramente distinguible de cr_terreno.
                     sym = QgsFillSymbol.createSimple({
-                        "color":         "255,145,0,140",   # #FF9100 alpha 55%
-                        "outline_color": "200,40,0,255",
+                        "color":         "33,150,243,140",   # #2196F3 alpha 55%
+                        "outline_color": "13,71,161,255",    # #0D47A1
                         "outline_width": "0.8",
                     })
                     layer.setRenderer(QgsSingleSymbolRenderer(sym))
@@ -727,10 +748,21 @@ class QgisProjectService:
                     layer.setLabeling(QgsVectorLayerSimpleLabeling(pal))
                     layer.setLabelsEnabled(True)
 
-                    # Agregar al proyecto + insertar al tope del árbol
+                    # Agregar al proyecto + insertar JUSTO DEBAJO de cr_terreno
+                    # en el layer tree (cr_terreno es la capa fuente de la geometría).
                     project.addMapLayer(layer, addToLegend=False)
                     root = project.layerTreeRoot()
-                    nodo = root.insertLayer(0, layer)
+                    idx_terreno = None
+                    for i, child in enumerate(root.children()):
+                        try:
+                            capa_ref = child.layer() if hasattr(child, "layer") else None
+                        except Exception:
+                            capa_ref = None
+                        if capa_ref is not None and capa_ref.name() == "cr_terreno":
+                            idx_terreno = i
+                            break
+                    pos_insert = (idx_terreno + 1) if idx_terreno is not None else 0
+                    nodo = root.insertLayer(pos_insert, layer)
                     if nodo is not None:
                         nodo.setItemVisibilityChecked(True)
 
@@ -742,6 +774,33 @@ class QgisProjectService:
 
             project.write(qgs_path)
             project.clear()
+
+            # Restaurar <relations> y <mapcanvas> del .qgs original
+            # (QgsProject.write() los reescribió con el estado en memoria).
+            if _relations_orig is not None or _mapcanvas_orig:
+                with open(qgs_path, "rb") as _f:
+                    _root_new = etree.fromstring(_f.read())
+
+                if _relations_orig is not None:
+                    _existing = _root_new.find("relations")
+                    if _existing is not None:
+                        _root_new.remove(_existing)
+                    _root_new.append(_relations_orig)
+
+                if _mapcanvas_orig:
+                    for _mc in _root_new.findall("mapcanvas"):
+                        _root_new.remove(_mc)
+                    for _mc in _mapcanvas_orig:
+                        _root_new.append(_mc)
+
+                with open(qgs_path, "wb") as _f:
+                    _f.write(etree.tostring(
+                        _root_new,
+                        xml_declaration=True,
+                        encoding="UTF-8",
+                        pretty_print=True,
+                    ))
+
             self._reempaquetar_qgz(qgs_path, tmp_dir)
         except Exception:
             shutil.rmtree(tmp_dir, ignore_errors=True)

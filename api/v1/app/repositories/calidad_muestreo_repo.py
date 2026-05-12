@@ -333,13 +333,185 @@ def get_predios(db: Session, pc_id: int) -> list[dict]:
         SELECT mcp.id_operacion,
                p.npn, p.npn_etiqueta, p.nombre_predio, p.municipio,
                mcp.en_muestra,
-               mcp.validado, mcp.fecha_validacion, mcp.validado_por
+               mcp.validado, mcp.fecha_validacion, mcp.validado_por,
+               p.calidad_campo, p.revisar_campo
           FROM admin_proyecto_calidad_muestreo_predio mcp
           JOIN lc_predio_p p ON p.id_operacion = mcp.id_operacion
          WHERE mcp.proyecto_id = :pc_id
          ORDER BY mcp.en_muestra DESC, p.npn
     """), {"pc_id": pc_id}).fetchall()
     return [dict(r._mapping) for r in rows]
+
+
+def sincronizar_desde_paquete(
+    db: Session, pc_id: int, zip_bytes: bytes, sincronizado_por: Optional[int],
+) -> dict:
+    """
+    Procesa un ZIP de proyecto offline sincronizado desde campo:
+      1. Extrae el ZIP en /tmp y abre el data.gpkg (sqlite3 read-only).
+      2. Lee (id_operacion, calidad_campo, revisar_campo) desde la tabla
+         `lc_predio_p*` del gpkg (puede tener sufijo UUID de QFieldSync).
+      3. Filtra al universo del proyecto.
+      4. UPDATE en lc_predio_p de PostGIS: calidad_campo + revisar_campo
+         (solo para predios del universo presentes en el gpkg).
+      5. UPDATE en admin_proyecto_calidad_muestreo_predio: marca
+         validado=TRUE para los predios EN MUESTRA cuyo calidad_campo=1.
+
+    Falla si el proyecto está cerrado o si el ZIP no contiene .gpkg.
+
+    Returns:
+      {leidos, fuera_universo, actualizados_predio, nuevos_validados,
+       ya_validados, total_muestra, validados, todos_validados}
+    """
+    import io
+    import os
+    import shutil
+    import sqlite3
+    import tempfile
+    import zipfile
+
+    cab = db.execute(text("""
+        SELECT estado FROM admin_proyecto_calidad_muestreo WHERE id = :id
+    """), {"id": pc_id}).fetchone()
+    if not cab:
+        raise ValueError(f"Proyecto de muestreo {pc_id} no encontrado")
+    if cab.estado == "cerrado":
+        raise ValueError("El proyecto está cerrado y no admite sincronización")
+
+    tmp_dir = tempfile.mkdtemp(prefix=f"calidad_sync_{pc_id}_")
+    try:
+        # El bytes recibido puede ser un .gpkg directo o un .zip que lo contenga.
+        gpkg_candidatos: list[str] = []
+        if zip_bytes[:4] == b"SQLi":  # cabecera "SQLite format 3"
+            gpkg_path = os.path.join(tmp_dir, "data.gpkg")
+            with open(gpkg_path, "wb") as f:
+                f.write(zip_bytes)
+            gpkg_candidatos.append(gpkg_path)
+        else:
+            try:
+                zf = zipfile.ZipFile(io.BytesIO(zip_bytes), "r")
+            except zipfile.BadZipFile:
+                raise ValueError("El archivo no es un ZIP válido ni un .gpkg")
+            zf.extractall(tmp_dir)
+            zf.close()
+            for root_dir, _, files in os.walk(tmp_dir):
+                for fname in files:
+                    if fname.lower().endswith(".gpkg"):
+                        gpkg_candidatos.append(os.path.join(root_dir, fname))
+            # Priorizar data.gpkg si existe (convención QFieldSync)
+            gpkg_candidatos.sort(
+                key=lambda p: 0 if os.path.basename(p).lower() == "data.gpkg" else 1
+            )
+            if not gpkg_candidatos:
+                raise ValueError("El ZIP no contiene ningún archivo .gpkg")
+
+        # Buscar la tabla lc_predio_p* en cada candidato hasta encontrarla
+        tabla_predio = None
+        gpkg_path    = None
+        for cand in gpkg_candidatos:
+            try:
+                conn = sqlite3.connect(f"file:{cand}?mode=ro", uri=True)
+            except sqlite3.DatabaseError:
+                continue
+            try:
+                for (nombre,) in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall():
+                    if (nombre or "").lower().startswith("lc_predio_p"):
+                        tabla_predio = nombre
+                        gpkg_path    = cand
+                        break
+            finally:
+                conn.close()
+            if tabla_predio:
+                break
+        if not tabla_predio:
+            nombres = [os.path.basename(p) for p in gpkg_candidatos]
+            raise ValueError(
+                f"Ninguno de los .gpkg del paquete contiene la tabla lc_predio_p "
+                f"(revisados: {nombres})"
+            )
+
+        conn = sqlite3.connect(f"file:{gpkg_path}?mode=ro", uri=True)
+        try:
+            filas = conn.execute(
+                f'SELECT id_operacion, calidad_campo, revisar_campo '
+                f'FROM "{tabla_predio}" WHERE id_operacion IS NOT NULL'
+            ).fetchall()
+        finally:
+            conn.close()
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    universo = {
+        r.id_operacion for r in db.execute(text("""
+            SELECT id_operacion FROM admin_proyecto_calidad_muestreo_predio
+             WHERE proyecto_id = :pc
+        """), {"pc": pc_id}).fetchall()
+    }
+
+    leidos = len(filas)
+    fuera_universo = 0
+    actualizados_predio = 0
+    ids_con_calidad_1: list[str] = []
+
+    for id_op, cal, rev in filas:
+        if id_op not in universo:
+            fuera_universo += 1
+            continue
+        cal_int = int(cal) if cal is not None and str(cal).strip() != "" else None
+        db.execute(text("""
+            UPDATE lc_predio_p
+               SET calidad_campo = :cal,
+                   revisar_campo = :rev
+             WHERE id_operacion = :id
+        """), {"cal": cal_int, "rev": rev, "id": id_op})
+        actualizados_predio += 1
+        if cal_int == 1:
+            ids_con_calidad_1.append(id_op)
+
+    nuevos = 0
+    if ids_con_calidad_1:
+        res = db.execute(text("""
+            UPDATE admin_proyecto_calidad_muestreo_predio
+               SET validado         = TRUE,
+                   fecha_validacion = NOW(),
+                   validado_por     = :user
+             WHERE proyecto_id  = :pc
+               AND en_muestra   = TRUE
+               AND validado     = FALSE
+               AND id_operacion = ANY(:ids)
+        """), {"user": sincronizado_por, "pc": pc_id, "ids": ids_con_calidad_1})
+        nuevos = res.rowcount or 0
+
+    ya_total = db.execute(text("""
+        SELECT COUNT(*) FROM admin_proyecto_calidad_muestreo_predio
+         WHERE proyecto_id  = :pc
+           AND en_muestra   = TRUE
+           AND id_operacion = ANY(:ids)
+    """), {"pc": pc_id, "ids": ids_con_calidad_1 or [""]}).scalar() or 0
+    ya_validados = max(int(ya_total) - nuevos, 0)
+
+    conteo = db.execute(text("""
+        SELECT
+          COUNT(*) FILTER (WHERE en_muestra = TRUE)                     AS total_muestra,
+          COUNT(*) FILTER (WHERE en_muestra = TRUE AND validado = TRUE) AS validados
+          FROM admin_proyecto_calidad_muestreo_predio
+         WHERE proyecto_id = :pc
+    """), {"pc": pc_id}).fetchone()
+    db.commit()
+    total     = int(conteo.total_muestra or 0)
+    validados = int(conteo.validados     or 0)
+    return {
+        "leidos":              leidos,
+        "fuera_universo":      fuera_universo,
+        "actualizados_predio": actualizados_predio,
+        "nuevos_validados":    nuevos,
+        "ya_validados":        ya_validados,
+        "total_muestra":       total,
+        "validados":           validados,
+        "todos_validados":     (total > 0 and validados == total),
+    }
 
 
 def get_asignaciones_de_proyecto(db: Session, pc_id: int) -> list[dict]:

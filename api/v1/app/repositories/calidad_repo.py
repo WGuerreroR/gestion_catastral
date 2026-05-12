@@ -77,6 +77,50 @@ def actualizar_calidad(db: Session, id_operacion: str, campo: str, valor: int):
     db.commit()
 
 
+def recalcular_total_calificacion_predio(db: Session, id_operacion: str) -> int:
+    """
+    Recalcula total_calificacion de cada cr_caracteristicasunidadconstruccion
+    del predio según IGAC Res. 070/2011 (Estructura 35 + Acabados 30 +
+    Baño 17 + Cocina 18). Lee los puntos por componente desde
+    admin_puntaje_calificacion y los suma, con cap por componente.
+    Retorna cuántas UCs actualizó.
+    """
+    res = db.execute(text("""
+        WITH p AS (
+          SELECT
+            c.id_operacion_unidad_cons AS uc,
+            LEAST(35,
+              COALESCE((SELECT puntos FROM admin_puntaje_calificacion WHERE componente='armazon'  AND tipo_id=c.armazon),  0) +
+              COALESCE((SELECT puntos FROM admin_puntaje_calificacion WHERE componente='muros'    AND tipo_id=c.muros),    0) +
+              COALESCE((SELECT puntos FROM admin_puntaje_calificacion WHERE componente='cubierta' AND tipo_id=c.cubierta), 0) +
+              COALESCE((SELECT puntos FROM admin_puntaje_calificacion WHERE componente='piso'     AND tipo_id=c.piso),     0)
+            ) AS estructura,
+            LEAST(30,
+              COALESCE((SELECT puntos FROM admin_puntaje_calificacion WHERE componente='fachada'           AND tipo_id=c.fachada),           0) +
+              COALESCE((SELECT puntos FROM admin_puntaje_calificacion WHERE componente='cubrimiento_muros' AND tipo_id=c.cubrimiento_muros), 0)
+            ) AS acabados,
+            LEAST(17,
+              COALESCE((SELECT puntos FROM admin_puntaje_calificacion WHERE componente='tamanio_banio'    AND tipo_id=c.tamanio_banio),    0) +
+              COALESCE((SELECT puntos FROM admin_puntaje_calificacion WHERE componente='enchape_banio'    AND tipo_id=c.enchape_banio),    0) +
+              COALESCE((SELECT puntos FROM admin_puntaje_calificacion WHERE componente='mobiliario_banio' AND tipo_id=c.mobiliario_banio), 0)
+            ) AS banio,
+            LEAST(18,
+              COALESCE((SELECT puntos FROM admin_puntaje_calificacion WHERE componente='tamanio_cocina'    AND tipo_id=c.tamanio_cocina),    0) +
+              COALESCE((SELECT puntos FROM admin_puntaje_calificacion WHERE componente='enchape_cocina'    AND tipo_id=c.enchape_cocina),    0) +
+              COALESCE((SELECT puntos FROM admin_puntaje_calificacion WHERE componente='mobiliario_cocina' AND tipo_id=c.mobiliario_cocina), 0)
+            ) AS cocina
+          FROM cr_caracteristicasunidadconstruccion c
+          WHERE c.id_operacion_predio = :id
+        )
+        UPDATE cr_caracteristicasunidadconstruccion c
+           SET total_calificacion = p.estructura + p.acabados + p.banio + p.cocina
+          FROM p
+         WHERE c.id_operacion_unidad_cons = p.uc
+    """), {"id": id_operacion})
+    db.commit()
+    return res.rowcount or 0
+
+
 def actualizar_observacion(db: Session, id_operacion: str, campo: str, texto: str):
     """Actualiza un campo de observación (revisar_campo, revisar_fisica, etc.)"""
     CAMPOS_PERMITIDOS = {

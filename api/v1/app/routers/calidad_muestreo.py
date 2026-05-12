@@ -6,7 +6,7 @@ seleccionando proyectos de asignación en estado 'validacion'.
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -30,6 +30,7 @@ from schemas.calidad_muestreo import (
     ProyectoDetalle,
     ProyectoResumen,
     RerandomizarRequest,
+    SincronizarResponse,
 )
 
 
@@ -288,3 +289,45 @@ def cerrar_proyecto(
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+@router.post("/{pc_id}/sincronizar", response_model=SincronizarResponse)
+async def sincronizar_proyecto(
+    pc_id: int,
+    paquete_zip: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user=Depends(require_roles("administrador", "supervisor")),
+):
+    """
+    Carga un ZIP de proyecto offline sincronizado desde campo, lee
+    `lc_predio_p` del data.gpkg y propaga `calidad_campo` y `revisar_campo`
+    a PostGIS para los predios del universo. Adicionalmente marca
+    `validado=TRUE` en el muestreo a los predios EN MUESTRA cuyo
+    `calidad_campo=1`.
+    """
+    print(f"[calidad-sync] proyecto={pc_id} archivo={paquete_zip.filename!r}", flush=True)
+    nombre = (paquete_zip.filename or "").lower()
+    if not (nombre.endswith(".zip") or nombre.endswith(".gpkg")):
+        msg = f"El archivo debe ser .zip o .gpkg (recibido: {paquete_zip.filename!r})"
+        print(f"[calidad-sync] 400: {msg}", flush=True)
+        raise HTTPException(400, msg)
+    contenido = await paquete_zip.read()
+    if not contenido:
+        print(f"[calidad-sync] 400: archivo vacío", flush=True)
+        raise HTTPException(400, "El archivo está vacío")
+    print(f"[calidad-sync] tamaño={len(contenido)} bytes", flush=True)
+
+    try:
+        out = calidad_muestreo_repo.sincronizar_desde_paquete(
+            db, pc_id, contenido,
+            sincronizado_por=int(user.get("sub") or 0) or None,
+        )
+        print(f"[calidad-sync] OK {out}", flush=True)
+        return out
+    except ValueError as e:
+        print(f"[calidad-sync] 400: {e}", flush=True)
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        import traceback
+        print(f"[calidad-sync] 500: {e}\n{traceback.format_exc()}", flush=True)
+        raise HTTPException(500, f"Error al sincronizar: {e}")

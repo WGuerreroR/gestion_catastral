@@ -44,6 +44,7 @@ import PublishIcon                 from '@mui/icons-material/Publish'
 import PhotoLibraryIcon            from '@mui/icons-material/PhotoLibrary'
 import HistoryIcon                 from '@mui/icons-material/History'
 import VisibilityIcon              from '@mui/icons-material/Visibility'
+import ContentCopyIcon             from '@mui/icons-material/ContentCopy'
 import PredioVisor                 from '../components/predio-visor/PredioVisor'
 import predioCompletoLectura       from '../config/predio-forms/predio-completo-lectura.json'
 
@@ -310,7 +311,6 @@ export default function AsignacionDetalle() {
       mostrarError(getErrorMessage(e, 'No se pudo cancelar la operación'))
     }
   }
-
   const iniciarPolling = useCallback(() => {
     detenerPolling()
     let failCount = 0
@@ -338,7 +338,7 @@ export default function AsignacionDetalle() {
         if (estado === 'error')     mostrarError('Error generando proyecto offline')
       }
     }, 3000)
-  }, [cargarEstadoOffline]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cargarEstadoOffline])
 
   // Cargar estado inicial + reanudar polling si ya está generando
   useEffect(() => {
@@ -455,7 +455,7 @@ export default function AsignacionDetalle() {
       mostrarSuccess(data?.mensaje || 'Proyecto offline cargado exitosamente')
       setModalCargarOffline(false)
       setArchivoOfflineSel(null)
-      cargarEstadoOffline()
+     // cargarEstadoOffline()
       cargarCloudStatus()
     } catch (e) {
       mostrarError(getErrorMessage(e, 'Error cargando proyecto offline'))
@@ -463,6 +463,21 @@ export default function AsignacionDetalle() {
       setArchivoOfflineSel(null)
     } finally {
       setSubiendoOffline(false)
+    }
+  }
+
+  // ── Copiar IDs de operación al portapapeles ──────────────
+  const handleCopiarIds = async () => {
+    const ids = predios.map(p => p.id_operacion).filter(Boolean).join(',')
+    if (!ids) {
+      mostrarError('No hay IDs de operación para copiar')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(ids)
+      mostrarSuccess(`${predios.length} IDs copiados al portapapeles`)
+    } catch {
+      mostrarError('No se pudo copiar al portapapeles')
     }
   }
 
@@ -1008,15 +1023,32 @@ export default function AsignacionDetalle() {
 
       {/* ── Tab Tabla ── */}
       {tab === 0 && (
-        <DataGrid
-          rows={predios}
-          columns={columnas}
-          autoHeight
-          pageSizeOptions={[10, 25, 50]}
-          initialState={{ pagination: { paginationModel: { pageSize: 10 } } }}
-          disableRowSelectionOnClick
-          sx={{ bgcolor: 'background.paper', borderRadius: 2 }}
-        />
+        <>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
+            <Tooltip title="Copiar todos los ID de operación separados por coma">
+              <span>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<ContentCopyIcon />}
+                  onClick={handleCopiarIds}
+                  disabled={!predios.length}
+                >
+                  Copiar IDs ({predios.length})
+                </Button>
+              </span>
+            </Tooltip>
+          </Box>
+          <DataGrid
+            rows={predios}
+            columns={columnas}
+            autoHeight
+            pageSizeOptions={[10, 25, 50]}
+            initialState={{ pagination: { paginationModel: { pageSize: 10 } } }}
+            disableRowSelectionOnClick
+            sx={{ bgcolor: 'background.paper', borderRadius: 2 }}
+          />
+        </>
       )}
 
       {/* ── Tab Mapa — siempre en DOM, visibilidad por CSS ── */}

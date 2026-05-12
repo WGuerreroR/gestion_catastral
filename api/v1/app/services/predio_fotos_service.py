@@ -40,11 +40,17 @@ def resolver_proyecto_activo(db: Session, id_operacion: str) -> dict | None:
 
 def resolver_path_foto(clave_proyecto: str, ruta_relativa: str) -> Path:
     """
-    Resuelve la ruta absoluta de una foto del paquete offline aplicando
-    la misma defensa contra path traversal que usa el endpoint
-    `/proyectos/{id}/offline/fotos/{ruta}`.
+    Resuelve la ruta absoluta de una foto con defensa contra path traversal.
 
-    Lanza ValueError si la ruta es inválida.
+    Convención canónica (post-migración 025): rutas en BD con prefijo
+    'DCIM/<archivo>' que resuelven a `DCIM_DIR/<archivo>` (repo central).
+
+    Compatibilidad:
+      - 'imgs/<archivo>' (pre-migración) → también resuelve a `DCIM_DIR/<archivo>`.
+      - Nombre suelto sin prefijo → `DCIM_DIR/<basename>`.
+
+    `clave_proyecto` se acepta por compat con callers existentes pero ya
+    no afecta la resolución (todas las fotos viven en DCIM_DIR).
     """
     if (
         not ruta_relativa
@@ -55,6 +61,6 @@ def resolver_path_foto(clave_proyecto: str, ruta_relativa: str) -> Path:
         raise ValueError("Ruta inválida")
 
     # Import diferido para evitar inicializar QGIS al importar este módulo
-    from services.qgis_export_service import EXPORTS_DIR
+    from services.qgis_export_service import DCIM_DIR
 
-    return Path(EXPORTS_DIR) / clave_proyecto / ruta_relativa
+    return Path(DCIM_DIR) / Path(ruta_relativa).name

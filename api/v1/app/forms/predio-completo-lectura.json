@@ -188,6 +188,8 @@
             "auditoria": { "habilitada": true } },
           { "field": "total_habitaciones", "label": "Habitaciones",         "widget": "number" },
           { "field": "total_banios",       "label": "Baños",                "widget": "number" },
+          { "field": "total_calificacion", "label": "Calificación (0-100)", "widget": "number", "decimales": 1,
+            "ayuda": "Suma de puntos Estructura + Acabados + Baño + Cocina. Se recalcula al aprobar calidad_fisica." },
           { "field": "observaciones",      "label": "Observaciones",        "widget": "textarea", "rows": 2 },
           { "field": "foto_fachada",       "label": "Foto fachada",         "widget": "photo" },
           { "field": "foto_cocina",        "label": "Foto cocina",          "widget": "photo" },

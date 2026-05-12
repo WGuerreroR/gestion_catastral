@@ -23,8 +23,104 @@ QGIS_EXPORTS_DIR = "/app/data/exports"
 EXPORTS_DIR      = "/app/data/exports"
 QGIS_TEMP_PATH   = os.getenv("QGIS_TEMP_PATH", "/app/data/exports/temp")
 
+# Repositorio centralizado de fotos (convención QField/Android: DCIM).
+# Único lugar canónico — las rutas en BD viven en formato 'DCIM/<archivo>'
+# y se resuelven a DCIM_DIR/<archivo>. Las copias scoped por proyecto
+# en EXPORTS_DIR/{clave}/DCIM/ son workdir efímero al armar paquetes; la
+# fuente de verdad es DCIM_DIR.
+DCIM_DIR = os.getenv("DCIM_DIR", "/app/data/DCIM")
+
 os.makedirs(QGIS_EXPORTS_DIR, exist_ok=True)
 os.makedirs(EXPORTS_DIR,      exist_ok=True)
+os.makedirs(DCIM_DIR,         exist_ok=True)
+
+# Tablas y columnas en BD que guardan rutas de foto. Espejar cuando se añadan
+# nuevos campos foto al modelo.
+_COLUMNAS_FOTO: list[tuple[str, list[str]]] = [
+    ("lc_predio_p", ["foto", "foto_2"]),
+    ("cr_caracteristicasunidadconstruccion", [
+        "foto_fachada", "foto_banio", "foto_cocina",
+        "foto_acabados", "foto_anexo", "foto_industrial",
+    ]),
+]
+
+_FK_POR_TABLA: dict[str, str] = {
+    "lc_predio_p":                          "id_operacion",
+    "cr_caracteristicasunidadconstruccion": "id_operacion_predio",
+}
+
+
+def _query_rutas_foto(db, id_operaciones: list[str]) -> set[str]:
+    """Devuelve el set de rutas referenciadas por los predios.
+
+    Itera _COLUMNAS_FOTO usando _FK_POR_TABLA para saber qué columna
+    relaciona cada tabla con el universo de id_operacion. Tolera rutas
+    con prefijo 'DCIM/' o 'imgs/' (pre-migración) o nombre suelto;
+    quien consuma esto solo usa el basename.
+    """
+    rutas: set[str] = set()
+    if not id_operaciones:
+        return rutas
+
+    for tabla, cols in _COLUMNAS_FOTO:
+        fk = _FK_POR_TABLA.get(tabla)
+        if not fk:
+            continue
+        for col in cols:
+            try:
+                res = db.execute(text(f"""
+                    SELECT "{col}" FROM {tabla}
+                     WHERE {fk} = ANY(:ids)
+                       AND "{col}" IS NOT NULL AND "{col}" <> ''
+                """), {"ids": id_operaciones}).fetchall()
+            except Exception as exc:
+                print(f"[FOTOS PAQUETE WARN] SELECT {tabla}.{col} falló: {exc}")
+                continue
+            for (ruta,) in res:
+                rutas.add(ruta)
+    return rutas
+
+
+def _incluir_fotos_en_paquete(db, workdir: str, id_operaciones: list[str]) -> int:
+    """Copia todas las fotos del universo a <workdir>/DCIM/. Idempotente.
+
+    Las rutas en BD tienen formato 'DCIM/<archivo>' y apuntan al repo central
+    DCIM_DIR. Aquí solo se copia el archivo físico al workdir; la ruta en BD
+    no cambia, así que QGIS/QField la resolverá relativa al .qgs y encontrará
+    la foto dentro del ZIP descargado.
+    """
+    dcim_dst = os.path.join(workdir, "DCIM")
+    os.makedirs(dcim_dst, exist_ok=True)
+
+    try:
+        rutas = _query_rutas_foto(db, id_operaciones)
+    except Exception as exc:
+        print(f"[FOTOS PAQUETE WARN] _query_rutas_foto falló: {exc}")
+        return 0
+
+    copiadas = 0
+    for ruta in rutas:
+        # Tolerar 'DCIM/X', 'imgs/X' (legacy pre-migración) o nombre suelto.
+        basename = os.path.basename(ruta.replace("\\", "/"))
+        if not basename:
+            continue
+        src = os.path.join(DCIM_DIR, basename)
+        dst = os.path.join(dcim_dst, basename)
+        if os.path.exists(dst):
+            continue
+        if not os.path.isfile(src):
+            print(f"[FOTOS PAQUETE WARN] archivo no encontrado en DCIM_DIR: {basename}")
+            continue
+        try:
+            try:
+                os.link(src, dst)
+            except OSError:
+                shutil.copy2(src, dst)
+            copiadas += 1
+        except Exception as exc:
+            print(f"[FOTOS PAQUETE WARN] no se pudo copiar {basename}: {exc}")
+    return copiadas
+
 
 # Progreso en memoria (proyecto_id → porcentaje 0-100).
 # Solo existe mientras la tarea background está activa.
@@ -231,8 +327,10 @@ def generar_paquete_calidad_muestreo(
         muestra_por_lote.setdefault(r.lote, []).append(r.id_operacion)
 
     with tempfile.TemporaryDirectory() as workdir:
+        from services.qgis_project_service import PROYECTO_CALIDAD_DIR
         qgis_svc = QgisProjectService(
             clave_proyecto=clave, output_base_dir=workdir,
+            proyecto_base_dir=PROYECTO_CALIDAD_DIR,
         )
         qgis_svc.copiar_proyecto_base()
 
@@ -253,7 +351,16 @@ def generar_paquete_calidad_muestreo(
             muestra_por_asignacion=muestra_por_lote,
         )
 
+        _incluir_fotos_en_paquete(db, qgis_svc.output_dir, universo)
+
         zip_path = qgis_svc.comprimir(workdir)
+
+        # Agregar carpetas vacías offline/ y cloud/ (espacio para que el
+        # operador deje el .qgz offline/QFC al regresar de campo).
+        with zipfile.ZipFile(zip_path, "a", zipfile.ZIP_DEFLATED) as zf:
+            for carpeta in ("offline/", "cloud/"):
+                zf.writestr(zipfile.ZipInfo(carpeta), b"")
+
         with open(zip_path, "rb") as f:
             return f.read()
 
@@ -366,6 +473,8 @@ def generar_paquete_proyecto(
         extent=(xmin, ymin, xmax, ymax),
         on_progress=on_progress,
     )
+
+    _incluir_fotos_en_paquete(db, qgis_svc.output_dir, predios_ids)
 
     return qgis_svc.output_dir
 

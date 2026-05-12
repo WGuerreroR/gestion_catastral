@@ -10,3 +10,4 @@ qfieldcloud-sdk==0.15.0
 python-multipart>=0.0.9
 fpdf2==2.8.4
 Pillow>=10.0.0
+cryptography>=43.0.0

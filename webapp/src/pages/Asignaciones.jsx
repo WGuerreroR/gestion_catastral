@@ -296,22 +296,22 @@ export default function Asignaciones() {
     if (seleccionado?.id === proyectoActivo?.id) {
       setSeleccionado({ ...seleccionado, total_predios: (seleccionado.total_predios || 0) + total })
     }
-    // Dispara regeneración offline en background (fire-and-forget)
-    // El progreso detallado se ve en la página de detalle.
-    if (proyectoActivo?.id) {
-      try {
-        await api.post(
-          `/proyectos/${proyectoActivo.id}/proyecto-offline/generar`,
-          null,
-          { params: { reemplazar: true } }
-        )
-        if (seleccionado?.id === proyectoActivo?.id) {
-          cargarEstadoOffline(proyectoActivo.id)
-        }
-      } catch (e) {
-        console.warn('[offline] regeneración tras asignación falló:', e?.message)
-      }
-    }
+    // Generación offline automática deshabilitada — se dispara manualmente
+    // desde el detalle del proyecto. Para reactivar, descomentar el bloque.
+    // if (proyectoActivo?.id) {
+    //   try {
+    //     await api.post(
+    //       `/proyectos/${proyectoActivo.id}/proyecto-offline/generar`,
+    //       null,
+    //       { params: { reemplazar: true } }
+    //     )
+    //     if (seleccionado?.id === proyectoActivo?.id) {
+    //       cargarEstadoOffline(proyectoActivo.id)
+    //     }
+    //   } catch (e) {
+    //     console.warn('[offline] regeneración tras asignación falló:', e?.message)
+    //   }
+    // }
   }
 
   // ── Columnas DataGrid ───────────────────────────────────
@@ -555,7 +555,7 @@ export default function Asignaciones() {
         onRowClick={({ row }) => {
           setSeleccionado(row)
           detenerPolling()
-          cargarEstadoOffline(row.id)
+          //cargarEstadoOffline(row.id)
         }}
         disableRowSelectionOnClick={false}
         sx={{

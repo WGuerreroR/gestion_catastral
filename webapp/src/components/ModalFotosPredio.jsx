@@ -21,11 +21,7 @@ import CloseIcon        from '@mui/icons-material/Close'
 import OpenInFullIcon   from '@mui/icons-material/OpenInFull'
 import api from '../api/axios'
 import { getErrorMessage } from '../utils/errorHandler'
-
-// Las URLs que devuelve el backend son paths absolutos tipo "/api/v1/...".
-// Como <img src> no pasa por axios, hay que prependerles el host de la API.
-const API_HOST = (import.meta.env.VITE_API_URL || '').replace(/\/+$/, '')
-const urlAbsoluta = (path) => `${API_HOST}${path}`
+import { urlConToken as urlAbsoluta } from '../utils/fotoUrl'
 
 
 export default function ModalFotosPredio({ open, onClose, proyectoId, idOperacion }) {

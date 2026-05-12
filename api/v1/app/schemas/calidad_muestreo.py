@@ -82,6 +82,17 @@ class ReabrirProyectoResponse(BaseModel):
     estado: str = "activo"
 
 
+class SincronizarResponse(BaseModel):
+    leidos: int                # filas de lc_predio_p leídas del gpkg
+    fuera_universo: int        # leídas pero no parte del universo del proyecto
+    actualizados_predio: int   # UPDATEs aplicados a lc_predio_p en PostGIS
+    nuevos_validados: int      # predios muestra recién validados
+    ya_validados: int          # predios muestra ya estaban validados
+    total_muestra: int
+    validados: int
+    todos_validados: bool
+
+
 class ProyectoResumen(BaseModel):
     id: int
     nombre: str
@@ -127,3 +138,5 @@ class PredioDeProyecto(BaseModel):
     validado: bool = False
     fecha_validacion: Optional[datetime] = None
     validado_por: Optional[int] = None
+    calidad_campo: Optional[int] = None
+    revisar_campo: Optional[str] = None

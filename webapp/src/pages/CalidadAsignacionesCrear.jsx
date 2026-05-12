@@ -282,6 +282,7 @@ export default function CalidadAsignacionesCrear() {
                     <MenuItem value={0.15}>15%</MenuItem>
                     <MenuItem value={0.20}>20%</MenuItem>
                     <MenuItem value={0.25}>25%</MenuItem>
+                    <MenuItem value={0.25}>50%</MenuItem>
                   </Select>
                 </FormControl>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

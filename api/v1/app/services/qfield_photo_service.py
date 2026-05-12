@@ -1,14 +1,12 @@
 """
 app/services/qfield_photo_service.py
 
-Copia las fotos del DCIM/ del paquete offline al directorio
-`EXPORTS_DIR/{clave_proyecto}/DCIM/` (carpeta por asignación).
-
-Las rutas en PostGIS quedan en formato relativo (`DCIM/foto.jpg`) — el
-mismo que viene del GPKG y el mismo que QField espera al regenerar el
-paquete offline. La resolución a archivo físico se hace en el endpoint
-de recuperación de fotos, que combina la clave del proyecto con la
-ruta relativa para construir el path completo.
+Procesa las fotos del DCIM/ del paquete sincronizado desde QField:
+  1. Las copia al workdir scoped por proyecto `EXPORTS_DIR/{clave}/DCIM/`
+     (efímero, sirve solo como buffer durante el sync).
+  2. Las replica al repo central `DCIM_DIR` (fuente de verdad, persistente).
+  3. Reescribe las rutas en BD al formato canónico `DCIM/<archivo>`, que
+     el resolver expandirá a `DCIM_DIR/<archivo>`.
 
 Maneja colisiones (mismo nombre, contenido distinto), fotos huérfanas
 (en paquete pero no referenciadas en BD) y faltantes (referenciadas en
@@ -28,10 +26,58 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from services.qfield_upsert_service import CAPAS_EDITABLES
-from services.qgis_export_service import EXPORTS_DIR
+from services.qgis_export_service import EXPORTS_DIR, DCIM_DIR
 
 
 DCIM_SUBDIR = "DCIM"
+# Prefijo canónico para las rutas en BD que apuntan al repo central
+# `DCIM_DIR`. El resolver expande `DCIM/<archivo>` a `DCIM_DIR/<archivo>`.
+DCIM_PREFIJO = "DCIM"
+
+
+def copiar_a_repo_central(origen: str, archivo: str) -> bool:
+    """Replica `origen` en `DCIM_DIR/{archivo}` (carpeta plana, repo central).
+
+    Estrategia:
+      - Si el destino ya existe con el mismo SHA-256 → no-op (idempotente).
+      - Intenta hardlink primero (rápido, sin gastar disco). Si falla
+        (filesystems distintos, perms) → cae a `shutil.copy2`.
+      - Errores se loggean y devuelven False para que el caller decida.
+
+    No reescribe BD. El caller debe reescribir la celda a `DCIM/<archivo>`.
+    """
+    try:
+        if not os.path.isfile(origen):
+            return False
+        os.makedirs(DCIM_DIR, exist_ok=True)
+        destino = os.path.join(DCIM_DIR, archivo)
+        # Idempotencia: si destino existe con mismo contenido, no hacer nada
+        if os.path.isfile(destino):
+            try:
+                if _hash_archivo(origen) == _hash_archivo(destino):
+                    return True
+            except Exception:
+                pass
+            # Mismo nombre, contenido distinto → conservar el más reciente
+            os.remove(destino)
+        try:
+            os.link(origen, destino)
+        except OSError:
+            shutil.copy2(origen, destino)
+        return True
+    except Exception:
+        return False
+
+
+def _hash_archivo(path: str, chunk_size: int = 65536) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            buf = f.read(chunk_size)
+            if not buf:
+                break
+            h.update(buf)
+    return h.hexdigest()
 
 
 @dataclass
@@ -267,18 +313,28 @@ def procesar_dcim(
             if not os.path.exists(ruta_destino):
                 shutil.copy2(ruta_origen, ruta_destino)
                 res.copiadas_nuevas += 1
+                # Replicar al repo central y reescribir BD a "DCIM/<nombre>"
+                if copiar_a_repo_central(ruta_destino, nombre_ref):
+                    _reescribir_referencias_bd(
+                        db, celdas, f"{DCIM_PREFIJO}/{nombre_ref}", res
+                    )
             elif _archivos_son_iguales(ruta_origen, ruta_destino):
-                # El archivo ya está en destino con el mismo contenido — típico
-                # de un re-sync del mismo paquete. Skip silencioso.
+                # Re-sync del mismo paquete. Asegurar idempotentemente que
+                # también esté en el repo central + BD canónica.
                 res.skip_idem += 1
+                if copiar_a_repo_central(ruta_destino, nombre_ref):
+                    _reescribir_referencias_bd(
+                        db, celdas, f"{DCIM_PREFIJO}/{nombre_ref}", res
+                    )
             else:
                 # Colisión real: nombre igual, contenido distinto. Copiar con
-                # sufijo y reescribir BD apuntando al archivo renombrado
-                # (manteniendo el formato relativo "DCIM/{nombre_colision}").
+                # sufijo y reescribir BD a "DCIM/<nombre_colision>".
                 nombre_colision = _aplicar_sufijo_colision(nombre_ref, sync_id)
-                shutil.copy2(ruta_origen, os.path.join(destino_dir, nombre_colision))
+                ruta_destino_colision = os.path.join(destino_dir, nombre_colision)
+                shutil.copy2(ruta_origen, ruta_destino_colision)
                 res.colisiones_nombre += 1
-                ruta_relativa_nueva = f"{DCIM_SUBDIR}/{nombre_colision}"
+                copiar_a_repo_central(ruta_destino_colision, nombre_colision)
+                ruta_relativa_nueva = f"{DCIM_PREFIJO}/{nombre_colision}"
                 _reescribir_referencias_bd(db, celdas, ruta_relativa_nueva, res)
                 res.advertencias.append(
                     f"Colisión: {nombre_ref} ya existía con contenido distinto. "
@@ -289,7 +345,9 @@ def procesar_dcim(
             res.fallidas += 1
             res.errores.append(f"{nombre_ref}: {exc}")
 
-    # 4. Huérfanas: archivos en el paquete que no aparecen en ninguna referencia
+    # 4. Huérfanas: archivos en el paquete que no aparecen en ninguna referencia.
+    # NO tocan BD (no hay celdas que apunten), pero sí replicamos al repo
+    # central por si el archivo es referenciado más adelante.
     for nombre, ruta_origen in archivos_paquete.items():
         if nombre in procesados:
             continue
@@ -298,13 +356,17 @@ def procesar_dcim(
             if os.path.exists(ruta_destino):
                 if _archivos_son_iguales(ruta_origen, ruta_destino):
                     res.skip_idem += 1
+                    copiar_a_repo_central(ruta_destino, nombre)
                     continue
                 nombre_colision = _aplicar_sufijo_colision(nombre, sync_id)
-                shutil.copy2(ruta_origen, os.path.join(destino_dir, nombre_colision))
+                ruta_destino_colision = os.path.join(destino_dir, nombre_colision)
+                shutil.copy2(ruta_origen, ruta_destino_colision)
                 res.huerfanas_copiadas += 1
+                copiar_a_repo_central(ruta_destino_colision, nombre_colision)
             else:
                 shutil.copy2(ruta_origen, ruta_destino)
                 res.huerfanas_copiadas += 1
+                copiar_a_repo_central(ruta_destino, nombre)
         except Exception as exc:
             res.fallidas += 1
             res.errores.append(f"huérfana {nombre}: {exc}")

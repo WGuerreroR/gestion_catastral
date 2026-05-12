@@ -18,6 +18,7 @@ import EditIcon       from '@mui/icons-material/Edit'
 import LockIcon       from '@mui/icons-material/Lock'
 import LockOpenIcon   from '@mui/icons-material/LockOpen'
 import AssignmentIcon from '@mui/icons-material/Assignment'
+import SyncIcon       from '@mui/icons-material/Sync'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import api from '../api/axios'
@@ -56,6 +57,7 @@ export default function CalidadAsignacionesDetalle() {
   const [cerrarOpen, setCerrarOpen]   = useState(false)
   const [cerrando,    setCerrando]    = useState(false)
   const [validandoId, setValidandoId] = useState(null)  // id_operacion del que se está toggleando
+  const [sincronizando, setSincronizando] = useState(false)
   const [editarOpen,  setEditarOpen]  = useState(false)
   const [editNombre,  setEditNombre]  = useState('')
   const [editDescripcion, setEditDescripcion] = useState('')
@@ -226,6 +228,37 @@ export default function CalidadAsignacionesDetalle() {
     }
   }
 
+  const sincronizar = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''  // permitir volver a cargar el mismo archivo
+    if (!file) return
+    const lower = file.name.toLowerCase()
+    if (!lower.endsWith('.zip') && !lower.endsWith('.gpkg')) {
+      mostrarError('El archivo debe ser un .zip o un .gpkg')
+      return
+    }
+    setSincronizando(true)
+    try {
+      const form = new FormData()
+      form.append('paquete_zip', file)
+      const { data } = await api.post(
+        `/calidad-muestreo/${id}/sincronizar`,
+        form,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      mostrarSuccess(
+        `Leídos ${data.leidos} predio(s), actualizados ${data.actualizados_predio}, ` +
+        `nuevos validados ${data.nuevos_validados}. ` +
+        `Validados ${data.validados}/${data.total_muestra}.`
+      )
+      cargar()
+    } catch (e) {
+      mostrarError(getErrorMessage(e, 'Error al sincronizar'))
+    } finally {
+      setSincronizando(false)
+    }
+  }
+
   const ejecutarRerandomizar = async () => {
     setRerandomizando(true)
     try {
@@ -280,6 +313,18 @@ export default function CalidadAsignacionesDetalle() {
           />
         )
       },
+    },
+    {
+      field: 'calidad_campo', headerName: 'Calidad campo', width: 130,
+      renderCell: ({ value }) => Number(value) === 1
+        ? <Chip label="1" size="small" color="success" />
+        : <Chip label={value ?? '—'} size="small" variant="outlined" />,
+    },
+    {
+      field: 'revisar_campo', headerName: 'Observación campo', flex: 1, minWidth: 200,
+      renderCell: ({ value }) => value
+        ? <Tooltip title={value}><Typography variant="body2" noWrap>{value}</Typography></Tooltip>
+        : <Typography variant="body2" color="text.disabled">—</Typography>,
     },
   ]
 
@@ -403,6 +448,26 @@ export default function CalidadAsignacionesDetalle() {
             </Tooltip>
           )
         })()}
+        <Tooltip title={proyecto?.estado === 'cerrado'
+          ? 'Proyecto cerrado: no admite sincronización'
+          : 'Cargar ZIP sincronizado y propagar calidad_campo / revisar_campo'}>
+          <span>
+            <Button
+              variant="outlined" color="info"
+              component="label"
+              startIcon={sincronizando ? <CircularProgress size={16} /> : <SyncIcon />}
+              disabled={sincronizando || proyecto?.estado === 'cerrado'}
+            >
+              {sincronizando ? 'Sincronizando…' : 'Sincronizar'}
+              <input
+                type="file"
+                accept=".zip,application/zip,.gpkg"
+                hidden
+                onChange={sincronizar}
+              />
+            </Button>
+          </span>
+        </Tooltip>
         <Button
           variant="contained" color="success"
           startIcon={<DoneAllIcon />}
@@ -612,6 +677,7 @@ export default function CalidadAsignacionesDetalle() {
                 <MenuItem value={0.15}>15%</MenuItem>
                 <MenuItem value={0.20}>20%</MenuItem>
                 <MenuItem value={0.25}>25%</MenuItem>
+                <MenuItem value={0.25}>50%</MenuItem>
               </Select>
             </FormControl>
 

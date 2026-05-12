@@ -21,6 +21,11 @@ import Marcas            from './pages/Marcas'
 import ValidacionCalidad        from './pages/ValidacionCalidad'
 import ValidacionCalidadJob     from './pages/ValidacionCalidadJob'
 import ValidacionCalidadReglas  from './pages/ValidacionCalidadReglas'
+import MigracionLadm            from './pages/MigracionLadm'
+import MigracionLadmCrear       from './pages/MigracionLadmCrear'
+import MigracionLadmJob         from './pages/MigracionLadmJob'
+import MigracionLadmConexiones  from './pages/MigracionLadmConexiones'
+import RevisionMasiva           from './pages/RevisionMasiva'
 import ProtectedRoute from './components/ProtectedRoute'
 import Sidebar, { SIDEBAR_WIDTH, SIDEBAR_WIDTH_CLOSED } from './components/Sidebar'
 import Navbar         from './components/Navbar'
@@ -86,6 +91,11 @@ export default function App() {
         <Route path="/validacion-calidad"            element={<Layout><ValidacionCalidad /></Layout>} />
         <Route path="/validacion-calidad/jobs/:id"   element={<Layout><ValidacionCalidadJob /></Layout>} />
         <Route path="/validacion-calidad/reglas"     element={<Layout><ValidacionCalidadReglas /></Layout>} />
+        <Route path="/migracion-ladm"             element={<Layout><MigracionLadm /></Layout>} />
+        <Route path="/migracion-ladm/crear"       element={<Layout><MigracionLadmCrear /></Layout>} />
+        <Route path="/migracion-ladm/conexiones"  element={<Layout><MigracionLadmConexiones /></Layout>} />
+        <Route path="/migracion-ladm/:id"         element={<Layout><MigracionLadmJob /></Layout>} />
+        <Route path="/revision-masiva"            element={<Layout><RevisionMasiva /></Layout>} />
         <Route path="/perfil"       element={<Layout><Perfil /></Layout>} />
       </Route>
       <Route path="*" element={<Navigate to={user ? '/asignaciones' : '/login'} />} />
