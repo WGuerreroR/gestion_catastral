@@ -4,8 +4,8 @@
     "subdirs": [],
     "items": [
       {
-        "url": "http://34.171.139.206:8300",
-        "id": "34.171.139.206:8300",
+        "url": "http://34.171.139.206:8200",
+        "id": "34.171.139.206:8200",
         "name": "Ingicat",
         "title": "Ingicat",
         "description": "",
@@ -202,14 +202,14 @@
           "construccion",
           "lc_predio_p"
         ],
-        "legendUrl": "http://34.171.139.206:8300/?",
-        "featureInfoUrl": "http://34.171.139.206:8300/?",
-        "printUrl": "http://34.171.139.206:8300/?",
+        "legendUrl": "http://34.171.139.206:8200/?",
+        "featureInfoUrl": "http://34.171.139.206:8200/?",
+        "printUrl": "http://34.171.139.206:8200/?",
         "editConfig": null,
-        "thumbnail": "img/genmapthumbs/34.171.139.206:8300.png"
+        "thumbnail": "img/genmapthumbs/34.171.139.206:8200.png"
       }
     ],
-    "defaultTheme": "34.171.139.206:8300",
+    "defaultTheme": "34.171.139.206:8200",
     "defaultMapCrs": "EPSG:3857",
     "defaultScales": [
       4000000,
