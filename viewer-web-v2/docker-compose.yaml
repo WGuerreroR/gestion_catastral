@@ -1,0 +1,9 @@
+version: '3.7'
+services:
+  apache:
+    image: httpd:latest
+    container_name: apache_app_ch
+    ports:
+    - '8600:80'
+    volumes:
+    - ./prod:/usr/local/apache2/htdocs

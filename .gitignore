@@ -9,9 +9,11 @@ api/v1/app/services/__pycache__/*
 api/v1/app/utils/__pycache__/*
 .DS_Store
 .DS_Store
+.env
 tests/__init__.py
 tests/__pycache__/*
 ETL/*
-api-ili/*
 data/qgis/DCIM/*
 data/qgis/imgs/*
+api-ili/*
+

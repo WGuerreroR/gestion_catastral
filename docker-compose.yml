@@ -51,3 +51,25 @@ services:
       - POSTGRES_DB=CHIQUINQUIRA
       - POSTGRES_USER=admin
       - POSTGRES_PASSWORD=chiquinquira
+
+  viewer-1:
+    image: httpd:latest
+    container_name: apache_app_ch
+    ports:
+    - '8500:80'
+    volumes:
+    - ./viewer-web/prod:/usr/local/apache2/htdocs
+
+  viewer-2:
+    image: httpd:latest
+    container_name: apache_app_ch
+    ports:
+    - '8600:80'
+    volumes:
+    - ./viewer-web-v2/prod:/usr/local/apache2/htdocs
+
+  app:
+    build: ./webapp
+    ports:
+      - "80:80"
+    restart: always
